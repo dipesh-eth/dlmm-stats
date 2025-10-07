@@ -344,10 +344,12 @@ async function handleOpenPositions(interaction) {
   // Create embeds for positions
   for (let i = 0; i < positions.length; i++) {
     const pos = positions[i];
-    const pnlSign = pos.pnl.percent >= 0 ? '📈' : '📉';
-    const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+    const pnlSign = pos.pnl.percentNative >= 0 ? '📈' : '📉';
+    const pnlColor = pos.pnl.percentNative >= 0 ? '+' : '';
+    const uncollectedFeeNative = parseFloat(pos.unCollectedFeeNative || 0);
     const uncollectedFee = parseFloat(pos.unCollectedFee || 0);
     const shortPositionId = pos.position.substring(0, 8) + '...' + pos.position.substring(pos.position.length - 8);
+    const calculatedValue = (pos.current.amount0Adjusted * pos.price0) + (pos.current.amount1Adjusted * pos.price1);
 
     const posEmbed = new EmbedBuilder()
       .setColor(pos.inRange ? '#00ff00' : '#ff0000')
@@ -355,9 +357,9 @@ async function handleOpenPositions(interaction) {
       .setDescription(
         `**💼 Position ID:** \`${shortPositionId}\`\n` +
         `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
-        `**💰 Current Value:** \`$${parseFloat(pos.currentValue).toFixed(2)}\`\n` +
-        `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percent.toFixed(2)}%\` (*${pnlColor}$${pos.pnl.value.toFixed(2)}*)\n` +
-        `**💵 Fees:** \`Collected: $${pos.collectedFee.toFixed(2)} | Uncollected: $${uncollectedFee.toFixed(2)}\`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
+        `**💰 Current Value:** \`$${calculatedValue.toFixed(4)}\`\n` +
+        `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percentNative.toFixed(2)}%\` (*${pnlColor}${pos.pnl.valueNative.toFixed(2)} Sol*)\n` +
+        `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(2)}Sol($${pos.collectedFee.toFixed(2)}) | Uncollected: ${uncollectedFeeNative.toFixed(2)} SOl($${uncollectedFee.toFixed(2)})\`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
         `**🪙 Holdings**\n` +
         `• **${pos.tokenName0}:** ${pos.current.amount0Adjusted.toFixed(4)}\n` +
         `• **${pos.tokenName1}:** ${pos.current.amount1Adjusted.toFixed(4)}\n\n` +
@@ -390,8 +392,8 @@ async function handlePositionDetails(interaction) {
   }
 
   const pos = data.data;
-  const pnlSign = pos.pnl.percent >= 0 ? '📈' : '📉';
-  const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+  const pnlSign = pos.pnl.percentNative >= 0 ? '📈' : '📉';
+  const pnlColor = pos.pnl.percentNative >= 0 ? '+' : '';
   const shortPositionId = pos.position.substring(0, 8) + '...' + pos.position.substring(pos.position.length - 8);
   const shortOwner = pos.owner.substring(0, 8) + '...' + pos.owner.substring(pos.owner.length - 8);
 
@@ -404,8 +406,8 @@ async function handlePositionDetails(interaction) {
       `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *${pos.status} for ${pos.age} days*\n\n` +
       `**💰 Current Value:** \`$${parseFloat(pos.currentValue).toFixed(2)}\`\n` +
       `**💵 Input Value:** \`$${pos.inputValue.toFixed(2)}\`\n` +
-      `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percent.toFixed(2)}%\` (*${pnlColor}$${pos.pnl.value.toFixed(2)}*)\n` +
-      `**💸 Fees:** \`Collected: $${pos.collectedFee.toFixed(2)} | Uncollected: $${parseFloat(pos.unCollectedFee || 0).toFixed(2)}\`\n\n` +
+      `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percentNative.toFixed(2)}%\` (*${pnlColor}${pos.pnl.valueNative.toFixed(2)} Sol*)\n` +
+      `**💸 Fees:** \`Collected: $${pos.collectedFeeNative.toFixed(2)} Sol | Uncollected: ${parseFloat(pos.unCollectedFeeNative || 0).toFixed(2)} Sol\`\n\n` +
       `**📉 Price Range**\n` +
       `• **Min:** \`${pos.priceRange[0].toFixed(6)}\`\n` +
       `• **Max:** \`${pos.priceRange[1].toFixed(6)}\`\n` +
@@ -495,13 +497,13 @@ async function handleHistory(interaction) {
                    `**📄 Page ${pagination.currentPage}/${pagination.totalPages}** | **📊 Total:** ${pagination.totalCount} positions\n\n`;
 
   positions.forEach((pos, idx) => {
-    const pnlSign = pos.pnl.percent >= 0 ? '✅' : '❌';
-    const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+    const pnlSign = pos.pnl.percentNative >= 0 ? '✅' : '❌';
+    const pnlColor = pos.pnl.percentNative >= 0 ? '+' : '';
     const posNum = (pagination.currentPage - 1) * pagination.pageSize + idx + 1;
     
     description += `**${posNum}. ${pos.tokenName0}/${pos.tokenName1} ${pnlSign}**\n` +
-                   `• **PnL:** ${pnlColor}${pos.pnl.percent.toFixed(2)}% (${pnlColor}$${pos.pnl.value.toFixed(2)})\n` +
-                   `• **Fees:** $${pos.collectedFee.toFixed(2)}\n` +
+                   `• **PnL:** ${pnlColor}${pos.pnl.percentNative.toFixed(2)}% (${pnlColor}$${pos.pnl.value.toFixed(2)})\n` +
+                   `• **Fees:** ${pos.collectedFeeNative.toFixed(2)} Sol\n` +
                    `• **Duration:** ${pos.age} days\n` +
                    `• **Opened:** ${new Date(pos.createdAt).toLocaleDateString()}\n` +
                    `• **Closed:** ${new Date(pos.closeAt).toLocaleDateString()}\n\n`;
