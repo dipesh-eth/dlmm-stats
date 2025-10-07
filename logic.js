@@ -11,7 +11,7 @@ class LPAgentClient {
    */
   async makeRequest(endpoint, params = {}) {
     const url = new URL(`${this.baseUrl}${endpoint}`);
-
+    
     // Add query parameters
     Object.keys(params).forEach(key => {
       if (params[key] !== undefined && params[key] !== null) {
@@ -109,6 +109,7 @@ class LPAgentClient {
 
     return output;
   }
+
   /**
    * Format overview/PnL statistics
    */
@@ -165,7 +166,7 @@ class LPAgentClient {
     positions.forEach((pos, idx) => {
       const pnlSign = pos.pnl.percent >= 0 ? '✅' : '❌';
       const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
-
+      
       output += `**${(pagination.currentPage - 1) * pagination.pageSize + idx + 1}. ${pos.tokenName0}/${pos.tokenName1}**\n`;
       output += `  • ${pnlSign} PnL: ${pnlColor}${pos.pnl.percent.toFixed(2)}% ($${pnlColor}${pos.pnl.value.toFixed(2)})\n`;
       output += `  • Fees: $${pos.collectedFee.toFixed(2)}\n`;
@@ -177,5 +178,4 @@ class LPAgentClient {
     return output;
   }
 }
-
 export default LPAgentClient;

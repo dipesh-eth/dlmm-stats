@@ -1,10 +1,15 @@
-// LP Agent Discord Bot with Slash Commands
-// Using ES6 imports
-
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } from 'discord.js';
 import LPAgentClient from './logic.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 dotenv.config();
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Configuration from environment variables
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -15,6 +20,62 @@ if (!DISCORD_TOKEN || !CLIENT_ID || !LPAGENT_API_KEY) {
   console.error('❌ Missing required environment variables!');
   console.error('Please set: DISCORD_TOKEN, CLIENT_ID, LPAGENT_API_KEY');
   process.exit(1);
+}
+
+// Wallet storage file path
+const WALLETS_FILE = path.join(__dirname, 'wallets.json');
+
+// Initialize wallet storage
+function initWalletStorage() {
+  if (!fs.existsSync(WALLETS_FILE)) {
+    fs.writeFileSync(WALLETS_FILE, JSON.stringify({}, null, 2));
+    console.log('✅ Created wallets.json file');
+  }
+}
+
+// Read wallets from file
+function getWallets() {
+  try {
+    const data = fs.readFileSync(WALLETS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error reading wallets file:', error);
+    return {};
+  }
+}
+
+// Save wallets to file
+function saveWallets(wallets) {
+  try {
+    fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error saving wallets file:', error);
+    return false;
+  }
+}
+
+// Get wallet for a user
+function getUserWallet(userId) {
+  const wallets = getWallets();
+  return wallets[userId] || null;
+}
+
+// Register wallet for a user
+function registerUserWallet(userId, walletAddress) {
+  const wallets = getWallets();
+  wallets[userId] = walletAddress;
+  return saveWallets(wallets);
+}
+
+// Unregister wallet for a user
+function unregisterUserWallet(userId) {
+  const wallets = getWallets();
+  if (wallets[userId]) {
+    delete wallets[userId];
+    return saveWallets(wallets);
+  }
+  return false;
 }
 
 // Initialize clients
@@ -29,12 +90,29 @@ const lpAgent = new LPAgentClient(LPAGENT_API_KEY);
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
+    .setName('register_wallet')
+    .setDescription('Register your default wallet address')
+    .addStringOption(option =>
+      option.setName('wallet')
+        .setDescription('Your wallet address')
+        .setRequired(true)
+    ),
+  
+  new SlashCommandBuilder()
+    .setName('unregister_wallet')
+    .setDescription('Remove your registered wallet address'),
+  
+  new SlashCommandBuilder()
+    .setName('my_wallet')
+    .setDescription('View your registered wallet address'),
+  
+  new SlashCommandBuilder()
     .setName('positions')
     .setDescription('View open LP positions for a wallet')
     .addStringOption(option =>
       option.setName('wallet')
-        .setDescription('Wallet address')
-        .setRequired(true)
+        .setDescription('Wallet address (optional if you have registered)')
+        .setRequired(false)
     ),
   
   new SlashCommandBuilder()
@@ -42,8 +120,8 @@ const commands = [
     .setDescription('View closed LP positions for a wallet')
     .addStringOption(option =>
       option.setName('wallet')
-        .setDescription('Wallet address')
-        .setRequired(true)
+        .setDescription('Wallet address (optional if you have registered)')
+        .setRequired(false)
     )
     .addIntegerOption(option =>
       option.setName('page')
@@ -56,8 +134,8 @@ const commands = [
     .setDescription('View wallet overview and PnL stats')
     .addStringOption(option =>
       option.setName('wallet')
-        .setDescription('Wallet address')
-        .setRequired(true)
+        .setDescription('Wallet address (optional if you have registered)')
+        .setRequired(false)
     ),
   
   new SlashCommandBuilder()
@@ -90,6 +168,7 @@ async function registerCommands() {
 client.once('ready', async () => {
   console.log(`✅ Bot logged in as ${client.user.tag}`);
   console.log(`📊 LP Agent API connected`);
+  initWalletStorage();
   await registerCommands();
 });
 
@@ -101,6 +180,18 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.deferReply();
 
     switch (interaction.commandName) {
+      case 'register_wallet':
+        await handleRegisterWallet(interaction);
+        break;
+      
+      case 'unregister_wallet':
+        await handleUnregisterWallet(interaction);
+        break;
+      
+      case 'my_wallet':
+        await handleMyWallet(interaction);
+        break;
+      
       case 'positions':
         await handleOpenPositions(interaction);
         break;
@@ -131,8 +222,105 @@ client.on('interactionCreate', async (interaction) => {
 
 // === COMMAND HANDLERS ===
 
-async function handleOpenPositions(interaction) {
+// Wallet management handlers
+async function handleRegisterWallet(interaction) {
   const walletAddress = interaction.options.getString('wallet');
+  const userId = interaction.user.id;
+
+  if (registerUserWallet(userId, walletAddress)) {
+    const embed = new EmbedBuilder()
+      .setColor('#00ff00')
+      .setTitle('✅ Wallet Registered')
+      .setDescription(`Your wallet has been registered successfully!`)
+      .addFields({
+        name: '📍 Wallet Address',
+        value: `\`${walletAddress}\``,
+        inline: false
+      })
+      .setFooter({ text: 'You can now use commands without specifying a wallet address' })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.editReply('❌ Failed to register wallet. Please try again.');
+  }
+}
+
+async function handleUnregisterWallet(interaction) {
+  const userId = interaction.user.id;
+  const existingWallet = getUserWallet(userId);
+
+  if (!existingWallet) {
+    return interaction.editReply('❌ You don\'t have a registered wallet.');
+  }
+
+  if (unregisterUserWallet(userId)) {
+    const embed = new EmbedBuilder()
+      .setColor('#ff9900')
+      .setTitle('🗑️ Wallet Unregistered')
+      .setDescription('Your wallet has been removed successfully!')
+      .addFields({
+        name: '📍 Removed Wallet',
+        value: `\`${existingWallet}\``,
+        inline: false
+      })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.editReply('❌ Failed to unregister wallet. Please try again.');
+  }
+}
+
+async function handleMyWallet(interaction) {
+  const userId = interaction.user.id;
+  const walletAddress = getUserWallet(userId);
+
+  if (!walletAddress) {
+    return interaction.editReply('❌ You don\'t have a registered wallet. Use `/register_wallet` to register one.');
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor('#4a90e2')
+    .setTitle('👛 Your Registered Wallet')
+    .addFields({
+      name: '📍 Wallet Address',
+      value: `\`${walletAddress}\``,
+      inline: false
+    })
+    .setFooter({ text: 'Use /unregister_wallet to remove it' })
+    .setTimestamp();
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+// Helper function to get wallet address (from option or registered)
+function getWalletAddress(interaction) {
+  const providedWallet = interaction.options.getString('wallet');
+  if (providedWallet) {
+    return providedWallet;
+  }
+
+  const userId = interaction.user.id;
+  const registeredWallet = getUserWallet(userId);
+  
+  if (!registeredWallet) {
+    throw new Error('NO_WALLET');
+  }
+
+  return registeredWallet;
+}
+
+async function handleOpenPositions(interaction) {
+  let walletAddress;
+  try {
+    walletAddress = getWalletAddress(interaction);
+  } catch (error) {
+    if (error.message === 'NO_WALLET') {
+      return interaction.editReply('❌ No wallet address provided. Either:\n• Provide a wallet: `/positions wallet:<address>`\n• Register your wallet: `/register_wallet wallet:<address>`');
+    }
+    throw error;
+  }
   const data = await lpAgent.getOpenPositions(walletAddress);
   
   if (!data.data || data.data.length === 0) {
@@ -169,7 +357,7 @@ async function handleOpenPositions(interaction) {
       .addFields(
         { name: '🏦 Protocol', value: pos.protocol, inline: true },
         { name: '📍 Position ID', value: `\`${pos.position}\``, inline: true },
-        { name: '💵 Current Value', value: `$${parseFloat(pos.currentValue).toFixed(2)}`, inline: true },
+        { name: '💵 Current Value', value: `${parseFloat(pos.currentValue).toFixed(2)}`, inline: true },
         { name: '💰 Holdings', value: `${pos.current.amount0Adjusted.toFixed(4)} ${pos.tokenName0}\n${pos.current.amount1Adjusted.toFixed(4)} ${pos.tokenName1}`, inline: true },
         { name: `${pnlSign} PnL`, value: `${pnlColor}${pos.pnl.percent.toFixed(2)}%\n${pnlColor}$${pos.pnl.value.toFixed(2)}`, inline: true },
         { name: '💸 Fees', value: `Collected: $${pos.collectedFee.toFixed(2)}\nUncollected: $${uncollectedFee.toFixed(2)}${uncollectedFee > 0 ? ' 💰' : ''}`, inline: true },
@@ -194,7 +382,16 @@ async function handleOpenPositions(interaction) {
 }
 
 async function handleHistory(interaction) {
-  const walletAddress = interaction.options.getString('wallet');
+  let walletAddress;
+  try {
+    walletAddress = getWalletAddress(interaction);
+  } catch (error) {
+    if (error.message === 'NO_WALLET') {
+      return interaction.editReply('❌ No wallet address provided. Either:\n• Provide a wallet: `/history wallet:<address>`\n• Register your wallet: `/register_wallet wallet:<address>`');
+    }
+    throw error;
+  }
+  
   const page = interaction.options.getInteger('page') || 1;
 
   const data = await lpAgent.getHistoricalPositions(walletAddress, { page, pageSize: 10 });
@@ -236,7 +433,16 @@ async function handleHistory(interaction) {
 }
 
 async function handleOverview(interaction) {
-  const walletAddress = interaction.options.getString('wallet');
+  let walletAddress;
+  try {
+    walletAddress = getWalletAddress(interaction);
+  } catch (error) {
+    if (error.message === 'NO_WALLET') {
+      return interaction.editReply('❌ No wallet address provided. Either:\n• Provide a wallet: `/overview wallet:<address>`\n• Register your wallet: `/register_wallet wallet:<address>`');
+    }
+    throw error;
+  }
+  
   const data = await lpAgent.getOverview(walletAddress);
   
   if (!data || !data.data) {
