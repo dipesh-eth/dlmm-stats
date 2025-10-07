@@ -311,6 +311,8 @@ function getWalletAddress(interaction) {
   return registeredWallet;
 }
 
+// === UPDATED EMBED FUNCTIONS ===
+
 async function handleOpenPositions(interaction) {
   let walletAddress;
   try {
@@ -332,14 +334,9 @@ async function handleOpenPositions(interaction) {
 
   // Summary embed
   const summaryEmbed = new EmbedBuilder()
-    .setColor('#00ff00')
-    .setTitle('📊 Open LP Positions')
-    .setDescription(`Wallet: \`${walletAddress.substring(0, 8)}...${walletAddress.substring(walletAddress.length - 6)}\``)
-    .addFields({
-      name: 'Total Open Positions',
-      value: `${data.count} position(s)`,
-      inline: true
-    })
+    .setColor('#4a90e2')
+    .setTitle('💼 Open LP Positions')
+    .setDescription(`**👛 Wallet:** \`${walletAddress.substring(0, 8)}...${walletAddress.substring(walletAddress.length - 6)}\`\n\n**📊 Total Open Positions:** ${data.count}`)
     .setTimestamp();
 
   embeds.push(summaryEmbed);
@@ -350,20 +347,23 @@ async function handleOpenPositions(interaction) {
     const pnlSign = pos.pnl.percent >= 0 ? '📈' : '📉';
     const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
     const uncollectedFee = parseFloat(pos.unCollectedFee || 0);
+    const shortPositionId = pos.position.substring(0, 8) + '...' + pos.position.substring(pos.position.length - 8);
 
     const posEmbed = new EmbedBuilder()
-      .setColor(pos.pnl.percent >= 0 ? '#00ff00' : '#ff0000')
-      .setTitle(`${i + 1}. ${pos.tokenName0}/${pos.tokenName1}`)
-      .addFields(
-        { name: '🏦 Protocol', value: pos.protocol, inline: true },
-        { name: '📍 Position ID', value: `\`${pos.position}\``, inline: true },
-        { name: '💵 Current Value', value: `${parseFloat(pos.currentValue).toFixed(2)}`, inline: true },
-        { name: '💰 Holdings', value: `${pos.current.amount0Adjusted.toFixed(4)} ${pos.tokenName0}\n${pos.current.amount1Adjusted.toFixed(4)} ${pos.tokenName1}`, inline: true },
-        { name: `${pnlSign} PnL`, value: `${pnlColor}${pos.pnl.percent.toFixed(2)}%\n${pnlColor}$${pos.pnl.value.toFixed(2)}`, inline: true },
-        { name: '💸 Fees', value: `Collected: $${pos.collectedFee.toFixed(2)}\nUncollected: $${uncollectedFee.toFixed(2)}${uncollectedFee > 0 ? ' 💰' : ''}`, inline: true },
-        { name: '⏱️ Age', value: `${pos.age} days`, inline: true },
-        { name: '📊 Status', value: pos.inRange ? '✅ In Range' : '⚠️ Out of Range', inline: true },
-        { name: '🎯 Price Range', value: `${pos.priceRange[0].toFixed(6)} - ${pos.priceRange[1].toFixed(6)}`, inline: true }
+      .setColor(pos.inRange ? '#00ff00' : '#ff0000')
+      .setTitle(`💧 ${pos.protocol.charAt(0).toUpperCase() + pos.protocol.slice(1)} | ${pos.tokenName0}/${pos.tokenName1}`)
+      .setDescription(
+        `**💼 Position ID:** \`${shortPositionId}\`\n` +
+        `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
+        `**💰 Current Value:** \`$${parseFloat(pos.currentValue).toFixed(2)}\`\n` +
+        `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percent.toFixed(2)}%\` (*${pnlColor}$${pos.pnl.value.toFixed(2)}*)\n` +
+        `**💵 Fees:** \`Collected: $${pos.collectedFee.toFixed(2)} | Uncollected: $${uncollectedFee.toFixed(2)}\`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
+        `**🪙 Holdings**\n` +
+        `• **${pos.tokenName0}:** ${pos.current.amount0Adjusted.toFixed(4)}\n` +
+        `• **${pos.tokenName1}:** ${pos.current.amount1Adjusted.toFixed(4)}\n\n` +
+        `**📉 Price Range**\n` +
+        `• **Min:** \`${pos.priceRange[0].toFixed(6)}\`\n` +
+        `• **Max:** \`${pos.priceRange[1].toFixed(6)}\``
       )
       .setTimestamp();
 
@@ -381,53 +381,37 @@ async function handleOpenPositions(interaction) {
   }
 }
 
-async function handleHistory(interaction) {
-  let walletAddress;
-  try {
-    walletAddress = getWalletAddress(interaction);
-  } catch (error) {
-    if (error.message === 'NO_WALLET') {
-      return interaction.editReply('❌ No wallet address provided. Either:\n• Provide a wallet: `/history wallet:<address>`\n• Register your wallet: `/register_wallet wallet:<address>`');
-    }
-    throw error;
-  }
+async function handlePositionDetails(interaction) {
+  const positionId = interaction.options.getString('position_id');
+  const data = await lpAgent.getPositionDetails(positionId);
   
-  const page = interaction.options.getInteger('page') || 1;
-
-  const data = await lpAgent.getHistoricalPositions(walletAddress, { page, pageSize: 10 });
-  
-  if (!data.data || !data.data.data || data.data.data.length === 0) {
-    return interaction.editReply('📭 No historical positions found for this wallet.');
+  if (!data || !data.data) {
+    return interaction.editReply('❌ Could not fetch details for this position.');
   }
 
-  const positions = data.data.data;
-  const pagination = data.data.pagination;
+  const pos = data.data;
+  const pnlSign = pos.pnl.percent >= 0 ? '📈' : '📉';
+  const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+  const shortPositionId = pos.position.substring(0, 8) + '...' + pos.position.substring(pos.position.length - 8);
+  const shortOwner = pos.owner.substring(0, 8) + '...' + pos.owner.substring(pos.owner.length - 8);
 
   const embed = new EmbedBuilder()
-    .setColor('#4a90e2')
-    .setTitle('📜 Position History')
-    .setDescription(`Wallet: \`${walletAddress.substring(0, 8)}...${walletAddress.substring(walletAddress.length - 6)}\`\n\nPage ${pagination.currentPage}/${pagination.totalPages} | Total: ${pagination.totalCount} positions`)
+    .setColor(pos.inRange ? '#00ff00' : '#ff0000')
+    .setTitle(`💧 ${pos.protocol.charAt(0).toUpperCase() + pos.protocol.slice(1)} | ${pos.tokenName0}/${pos.tokenName1}`)
+    .setDescription(
+      `**💼 Position ID:** \`${shortPositionId}\`\n` +
+      `**👤 Owner:** \`${shortOwner}\`\n` +
+      `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *${pos.status} for ${pos.age} days*\n\n` +
+      `**💰 Current Value:** \`$${parseFloat(pos.currentValue).toFixed(2)}\`\n` +
+      `**💵 Input Value:** \`$${pos.inputValue.toFixed(2)}\`\n` +
+      `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percent.toFixed(2)}%\` (*${pnlColor}$${pos.pnl.value.toFixed(2)}*)\n` +
+      `**💸 Fees:** \`Collected: $${pos.collectedFee.toFixed(2)} | Uncollected: $${parseFloat(pos.unCollectedFee || 0).toFixed(2)}\`\n\n` +
+      `**📉 Price Range**\n` +
+      `• **Min:** \`${pos.priceRange[0].toFixed(6)}\`\n` +
+      `• **Max:** \`${pos.priceRange[1].toFixed(6)}\`\n` +
+      `• **Strategy:** ${pos.strategyType || 'N/A'}`
+    )
     .setTimestamp();
-
-  positions.forEach((pos, idx) => {
-    const pnlSign = pos.pnl.percent >= 0 ? '✅' : '❌';
-    const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
-    const posNum = (pagination.currentPage - 1) * pagination.pageSize + idx + 1;
-
-    embed.addFields({
-      name: `${posNum}. ${pos.tokenName0}/${pos.tokenName1} ${pnlSign}`,
-      value: `**PnL:** ${pnlColor}${pos.pnl.percent.toFixed(2)}% ($${pnlColor}${pos.pnl.value.toFixed(2)})\n` +
-             `**Fees:** $${pos.collectedFee.toFixed(2)}\n` +
-             `**Duration:** ${pos.age} days\n` +
-             `**Opened:** ${new Date(pos.createdAt).toLocaleDateString()}\n` +
-             `**Closed:** ${new Date(pos.closeAt).toLocaleDateString()}`,
-      inline: false
-    });
-  });
-
-  if (pagination.totalPages > 1) {
-    embed.setFooter({ text: `Use /history wallet:<wallet> page:<number> to view other pages` });
-  }
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -452,72 +436,32 @@ async function handleOverview(interaction) {
   const d = data.data;
   const totalPnlSign = d.total_pnl.ALL >= 0 ? '📈' : '📉';
   const pnlColor = d.total_pnl.ALL >= 0 ? '+' : '';
+  const shortWallet = d.owner.substring(0, 8) + '...' + d.owner.substring(d.owner.length - 8);
 
   const embed = new EmbedBuilder()
     .setColor(d.total_pnl.ALL >= 0 ? '#00ff00' : '#ff0000')
     .setTitle('💼 Wallet Overview & Performance')
-    .setDescription(`**Wallet:** \`${d.owner.substring(0, 8)}...${d.owner.substring(d.owner.length - 6)}\`\n**Chain:** ${d.chain} | **Protocol:** ${d.protocol}`)
-    .addFields(
-      { 
-        name: `${totalPnlSign} Total PnL`, 
-        value: `${pnlColor}$${d.total_pnl.ALL.toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '💰 Total Fees', 
-        value: `$${d.total_fee.ALL.toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '💵 ROI', 
-        value: `${(d.roi * 100).toFixed(2)}%`, 
-        inline: true 
-      },
-      { 
-        name: '📥 Total Inflow', 
-        value: `$${d.total_inflow.toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '📤 Total Outflow', 
-        value: `$${d.total_outflow.toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '🎯 Win Rate', 
-        value: `${(d.win_rate.ALL * 100).toFixed(2)}%\n(${d.win_lp}/${d.closed_lp.ALL} wins)`, 
-        inline: true 
-      },
-      { 
-        name: '📊 Positions', 
-        value: `Total: ${d.total_lp}\nOpen: ${d.opening_lp}\nClosed: ${d.closed_lp.ALL}`, 
-        inline: true 
-      },
-      { 
-        name: '🏊 Total Pools', 
-        value: `${d.total_pool}`, 
-        inline: true 
-      },
-      { 
-        name: '⏱️ Avg Age', 
-        value: `${d.avg_age_hour.toFixed(2)} hours`, 
-        inline: true 
-      },
-      { 
-        name: '📅 7 Days', 
-        value: `PnL: $${d.total_pnl['7D'].toFixed(2)}\nFees: $${d.total_fee['7D'].toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '📅 1 Month', 
-        value: `PnL: $${d.total_pnl['1M'].toFixed(2)}\nFees: $${d.total_fee['1M'].toFixed(2)}`, 
-        inline: true 
-      },
-      { 
-        name: '📅 3 Months', 
-        value: `PnL: $${d.total_pnl['3M'].toFixed(2)}\nFees: $${d.total_fee['3M'].toFixed(2)}`, 
-        inline: true 
-      }
+    .setDescription(
+      `**👛 Wallet:** \`${shortWallet}\`\n` +
+      `**⛓️ Chain:** ${d.chain} | **🏦 Protocol:** ${d.protocol}\n\n` +
+      `**${totalPnlSign} Total PnL:** \`${pnlColor}$${d.total_pnl.ALL.toFixed(2)}\`\n` +
+      `**💰 Total Fees:** \`$${d.total_fee.ALL.toFixed(2)}\`\n` +
+      `**💵 ROI:** \`${(d.roi * 100).toFixed(2)}%\`\n\n` +
+      `**📊 Positions Overview**\n` +
+      `• **Total:** ${d.total_lp}\n` +
+      `• **Open:** ${d.opening_lp}\n` +
+      `• **Closed:** ${d.closed_lp.ALL}\n` +
+      `• **Win Rate:** ${(d.win_rate.ALL * 100).toFixed(2)}% (${d.win_lp}/${d.closed_lp.ALL} wins)\n\n` +
+      `**💸 Flow Analysis**\n` +
+      `• **Total Inflow:** $${d.total_inflow.toFixed(2)}\n` +
+      `• **Total Outflow:** $${d.total_outflow.toFixed(2)}\n\n` +
+      `**📊 Statistics**\n` +
+      `• **Total Pools:** ${d.total_pool}\n` +
+      `• **Avg Age:** ${d.avg_age_hour.toFixed(2)} hours\n\n` +
+      `**📅 Performance Breakdown**\n` +
+      `• **7 Days:** PnL $${d.total_pnl['7D'].toFixed(2)} | Fees $${d.total_fee['7D'].toFixed(2)}\n` +
+      `• **1 Month:** PnL $${d.total_pnl['1M'].toFixed(2)} | Fees $${d.total_fee['1M'].toFixed(2)}\n` +
+      `• **3 Months:** PnL $${d.total_pnl['3M'].toFixed(2)} | Fees $${d.total_fee['3M'].toFixed(2)}`
     )
     .setFooter({ text: `Last Updated: ${d.updated_at}` })
     .setTimestamp();
@@ -525,36 +469,53 @@ async function handleOverview(interaction) {
   await interaction.editReply({ embeds: [embed] });
 }
 
-async function handlePositionDetails(interaction) {
-  const positionId = interaction.options.getString('position_id');
-  const data = await lpAgent.getPositionDetails(positionId);
+async function handleHistory(interaction) {
+  let walletAddress;
+  try {
+    walletAddress = getWalletAddress(interaction);
+  } catch (error) {
+    if (error.message === 'NO_WALLET') {
+      return interaction.editReply('❌ No wallet address provided. Either:\n• Provide a wallet: `/history wallet:<address>`\n• Register your wallet: `/register_wallet wallet:<address>`');
+    }
+    throw error;
+  }
   
-  if (!data || !data.data) {
-    return interaction.editReply('❌ Could not fetch details for this position.');
+  const page = interaction.options.getInteger('page') || 1;
+  const data = await lpAgent.getHistoricalPositions(walletAddress, { page, pageSize: 10 });
+  
+  if (!data.data || !data.data.data || data.data.data.length === 0) {
+    return interaction.editReply('📭 No historical positions found for this wallet.');
   }
 
-  const pos = data.data;
-  const pnlSign = pos.pnl.percent >= 0 ? '📈' : '📉';
-  const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+  const positions = data.data.data;
+  const pagination = data.data.pagination;
+  const shortWallet = walletAddress.substring(0, 8) + '...' + walletAddress.substring(walletAddress.length - 8);
+
+  let description = `**👛 Wallet:** \`${shortWallet}\`\n\n` +
+                   `**📄 Page ${pagination.currentPage}/${pagination.totalPages}** | **📊 Total:** ${pagination.totalCount} positions\n\n`;
+
+  positions.forEach((pos, idx) => {
+    const pnlSign = pos.pnl.percent >= 0 ? '✅' : '❌';
+    const pnlColor = pos.pnl.percent >= 0 ? '+' : '';
+    const posNum = (pagination.currentPage - 1) * pagination.pageSize + idx + 1;
+    
+    description += `**${posNum}. ${pos.tokenName0}/${pos.tokenName1} ${pnlSign}**\n` +
+                   `• **PnL:** ${pnlColor}${pos.pnl.percent.toFixed(2)}% (${pnlColor}$${pos.pnl.value.toFixed(2)})\n` +
+                   `• **Fees:** $${pos.collectedFee.toFixed(2)}\n` +
+                   `• **Duration:** ${pos.age} days\n` +
+                   `• **Opened:** ${new Date(pos.createdAt).toLocaleDateString()}\n` +
+                   `• **Closed:** ${new Date(pos.closeAt).toLocaleDateString()}\n\n`;
+  });
 
   const embed = new EmbedBuilder()
-    .setColor(pos.pnl.percent >= 0 ? '#00ff00' : '#ff0000')
-    .setTitle(`Position Details: ${pos.tokenName0}/${pos.tokenName1}`)
-    .setDescription(`**Status:** ${pos.status}\n**Protocol:** ${pos.protocol}`)
-    .addFields(
-      { name: '📍 Position ID', value: `\`${pos.position}\``, inline: false },
-      { name: '👤 Owner', value: `\`${pos.owner.substring(0, 12)}...${pos.owner.substring(pos.owner.length - 8)}\``, inline: false },
-      { name: '💵 Current Value', value: `$${parseFloat(pos.currentValue).toFixed(2)}`, inline: true },
-      { name: '💰 Input Value', value: `$${pos.inputValue.toFixed(2)}`, inline: true },
-      { name: `${pnlSign} PnL`, value: `${pnlColor}${pos.pnl.percent.toFixed(2)}%\n${pnlColor}$${pos.pnl.value.toFixed(2)}`, inline: true },
-      { name: '💸 Collected Fees', value: `$${pos.collectedFee.toFixed(2)}`, inline: true },
-      { name: '💰 Uncollected Fees', value: `$${parseFloat(pos.unCollectedFee || 0).toFixed(2)}`, inline: true },
-      { name: '📊 Status', value: pos.inRange ? '✅ In Range' : '⚠️ Out of Range', inline: true },
-      { name: '⏱️ Age', value: `${pos.age} days`, inline: true },
-      { name: '🎯 Price Range', value: `${pos.priceRange[0].toFixed(6)} - ${pos.priceRange[1].toFixed(6)}`, inline: true },
-      { name: '📈 Strategy', value: pos.strategyType || 'N/A', inline: true }
-    )
+    .setColor('#4a90e2')
+    .setTitle('📜 Position History')
+    .setDescription(description)
     .setTimestamp();
+
+  if (pagination.totalPages > 1) {
+    embed.setFooter({ text: `Use /history wallet:<wallet> page:<number> to view other pages` });
+  }
 
   await interaction.editReply({ embeds: [embed] });
 }
