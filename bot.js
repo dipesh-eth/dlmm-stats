@@ -3,11 +3,19 @@
 
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } from 'discord.js';
 import LPAgentClient from './logic.js';
+import dotenv from 'dotenv';
+dotenv.config();
+// Configuration from environment variables
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const LPAGENT_API_KEY = process.env.LPAGENT_API_KEY;
 
-// Configuration
-const DISCORD_TOKEN = 'MTQyNDkwODM3MTgwNjM4ODM0MA.G52hWC.8fewx_jYjJc2UYf3P57qP_77p9G5hCNjd2LkEY';
-const CLIENT_ID = '1424908371806388340';
-const LPAGENT_API_KEY = 'a6757731-7fe5-43f1-83a0-a364c501da4a';
+// Validate environment variables
+if (!DISCORD_TOKEN || !CLIENT_ID || !LPAGENT_API_KEY) {
+  console.error('❌ Missing required environment variables!');
+  console.error('Please set: DISCORD_TOKEN, CLIENT_ID, LPAGENT_API_KEY');
+  process.exit(1);
+}
 
 // Initialize clients
 const client = new Client({
@@ -160,7 +168,7 @@ async function handleOpenPositions(interaction) {
       .setTitle(`${i + 1}. ${pos.tokenName0}/${pos.tokenName1}`)
       .addFields(
         { name: '🏦 Protocol', value: pos.protocol, inline: true },
-        { name: '📍 Position ID', value: `\`${pos.position.substring(0, 12)}...\``, inline: true },
+        { name: '📍 Position ID', value: `\`${pos.position}\``, inline: true },
         { name: '💵 Current Value', value: `$${parseFloat(pos.currentValue).toFixed(2)}`, inline: true },
         { name: '💰 Holdings', value: `${pos.current.amount0Adjusted.toFixed(4)} ${pos.tokenName0}\n${pos.current.amount1Adjusted.toFixed(4)} ${pos.tokenName1}`, inline: true },
         { name: `${pnlSign} PnL`, value: `${pnlColor}${pos.pnl.percent.toFixed(2)}%\n${pnlColor}$${pos.pnl.value.toFixed(2)}`, inline: true },

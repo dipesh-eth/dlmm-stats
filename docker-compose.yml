@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  lpagent-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lpagent-discord-bot
+    restart: unless-stopped
+    environment:
+      # Discord Configuration
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - CLIENT_ID=${CLIENT_ID}
+      # LP Agent API
+      - LPAGENT_API_KEY=${LPAGENT_API_KEY}
+      # Node Environment
+      - NODE_ENV=production
+    # Optional: Mount logs directory
+    volumes:
+      - ./logs:/app/logs
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Network configuration (optional)
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
