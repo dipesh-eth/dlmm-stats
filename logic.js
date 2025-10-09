@@ -100,7 +100,7 @@ class LPAgentClient {
       output += `**${idx + 1}. ${pos.tokenName0}/${pos.tokenName1}** (${pos.protocol})\n`;
       output += `  • Position: ${pos.position.substring(0, 8)}...${pos.position.substring(pos.position.length - 6)}\n`;
       output += `  • Value: ${parseFloat(pos.currentValue).toFixed(2)} (${pos.current.amount0Adjusted.toFixed(4)} ${pos.tokenName0} + ${pos.current.amount1Adjusted.toFixed(4)} ${pos.tokenName1})\n`;
-      output += `  • ${pnlSign} PnL: ${pnlColor}${pos.pnl.percent.toFixed(2)}% (${pnlColor}${pos.pnl.value.toFixed(2)})\n`;
+      output += `  • ${pnlSign} PnL: ${pnlColor}${pos.pnl.percent.toFixed(2)}% (${pnlColor}${pos.pnl.value.toFixed(3)})\n`;
       output += `  • Fees Collected: ${pos.collectedFee.toFixed(2)}\n`;
       output += `  • Fees Uncollected: ${uncollectedFee.toFixed(2)}${uncollectedFee > 0 ? ' 💰' : ''}\n`;
       output += `  • Age: ${pos.age} days\n`;
