@@ -13,9 +13,9 @@ RUN npm ci --only=production
 # Copy application files
 COPY . .
 
-# Create a non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# Create a non-root user and group (if they don't exist)
+RUN groupadd -g 1001 nodejs || true && \
+    useradd -m -u 1001 -g nodejs nodejs || true
 
 # Change ownership of the app directory
 RUN chown -R nodejs:nodejs /app
@@ -28,4 +28,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD node -e "console.log('Health check passed')" || exit 1
 
 # Start the bot
-CMD ["node", "discord-bot.js"]
+CMD ["node", "bot.js"]
+
