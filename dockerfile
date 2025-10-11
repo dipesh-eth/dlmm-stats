@@ -20,6 +20,14 @@ RUN groupadd -g 1001 nodejs || true && \
 # Change ownership of the app directory
 RUN chown -R nodejs:nodejs /app
 
+RUN apt-get update && apt-get install -y \
+    fontconfig \
+    libfreetype6-dev \
+    libfontconfig1 \
+    fonts-liberation \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Switch to non-root user
 USER nodejs
 
