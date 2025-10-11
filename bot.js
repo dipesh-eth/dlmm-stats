@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
 import LPAgentClient from './logic.js';
+import { getPositionIdFromTx } from './helius.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -180,10 +181,10 @@ const commands = [
   
   new SlashCommandBuilder()
     .setName('pnl')
-    .setDescription('Generate a PnL card for a specific position')
+    .setDescription('Generate a PnL card from a Solscan transaction link')
     .addStringOption(option =>
-      option.setName('position_id')
-        .setDescription('Position ID')
+      option.setName('solscan_link')
+        .setDescription('The Solscan transaction link for the position')
         .setRequired(true)
     ),
 ].map(command => command.toJSON());
@@ -570,17 +571,44 @@ async function handleHistory(interaction) {
 }
 
 async function handlePnlCard(interaction) {
-  const positionId = interaction.options.getString('position_id');
+  const solscanLink = interaction.options.getString('solscan_link');
+  
+  // Extract the transaction signature from the URL
+  let signature;
+  try {
+    const url = new URL(solscanLink);
+    const pathParts = url.pathname.split('/');
+    // Find the 'tx' or 'transaction' part and get the next part as the signature
+    const txIndex = pathParts.findIndex(part => part === 'tx' || part === 'transaction');
+    if (txIndex !== -1 && pathParts.length > txIndex + 1) {
+      signature = pathParts[txIndex + 1];
+    } else {
+      throw new Error('Invalid URL format');
+    }
+  } catch (error) {
+    return interaction.editReply('❌ Invalid Solscan URL. Please provide a valid transaction link.');
+  }
+
+  if (!signature) {
+    return interaction.editReply('❌ Could not extract transaction signature from the link.');
+  }
+
+  // Get the position ID from the transaction
+  const positionId = await getPositionIdFromTx(signature);
+
+  if (!positionId) {
+    return interaction.editReply('❌ Could not find a valid position ID in that transaction. Please make sure it is the correct transaction.');
+  }
+
   const data = await lpAgent.getPositionDetails(positionId);
 
   if (!data || !data.data) {
-    return interaction.editReply('❌ Could not fetch details for this position.');
+    return interaction.editReply('❌ Could not fetch position details from the API using the found ID.');
   }
 
   const positionData = data.data;
 
   try {
-    // Generate the PnL card
     const imageBuffer = await createPnLCard(positionData);
     const attachment = new AttachmentBuilder(imageBuffer, { name: 'pnl-card.png' });
 
@@ -598,7 +626,6 @@ async function createPnLCard(positionData) {
     
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
-    console.log('Creating PnL card for position:', positionData);
 
     // Load and draw the background image
     const backgroundImagePath = path.join(__dirname, 'assets', 'background.png');

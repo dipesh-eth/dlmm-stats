@@ -13,11 +13,14 @@ services:
       - CLIENT_ID=${CLIENT_ID}
       # LP Agent API
       - LPAGENT_API_KEY=${LPAGENT_API_KEY}
+      # Helius RPC
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
       # Node Environment
       - NODE_ENV=production
     # Optional: Mount logs directory
     volumes:
       - ./logs:/app/logs
+      - ./wallets.json:/app/wallets.json
     # Resource limits (adjust as needed)
     deploy:
       resources:
