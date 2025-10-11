@@ -600,6 +600,7 @@ async function createPnLCard(positionData) {
     
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
+    console.log('Creating PnL card for position:', positionData);
 
     // Load and draw the background image
     const backgroundImagePath = path.join(__dirname, 'assets', 'background.png');
@@ -705,7 +706,7 @@ async function createPnLCard(positionData) {
 
     // TVL
     ctx.textAlign = 'left';
-    ctx.fillText(`TVL ${utils.formatCurrency(positionData.valueNative)}`, 40, bottomY);
+    ctx.fillText(`TVL ${utils.formatCurrency(positionData.inputNative)}`, 40, bottomY);
 
     // BIN STEP
     const binStep = positionData.poolInfo?.tickSpacing || 100;
