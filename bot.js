@@ -723,7 +723,7 @@ async function createPnLCard(positionData) {
     ctx.fillText(`PNL ${utils.formatPercentage(pnlPercent/100)}`, width - 40, bottomY);
 
     // Designer credit
-    ctx.font = '12px monospace';
+    ctx.font = '12px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#6B7280';
     ctx.textAlign = 'center';
     ctx.fillText('Broke DAO', width / 2, height - 15);
