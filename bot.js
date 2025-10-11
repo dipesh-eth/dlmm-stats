@@ -406,7 +406,9 @@ async function handleOpenPositions(interaction) {
         `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
         `**💰 Current Value:** \`$${calculatedValue.toFixed(4)}\`\n` +
         `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percentNative.toFixed(2)}%\` (*${pnlColor}${pos.pnl.valueNative.toFixed(3)} Sol*)\n` +
-        `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(3)}Sol($${pos.collectedFee.toFixed(2)}) | Uncollected: ${uncollectedFeeNative.toFixed(3)} SOl($${uncollectedFee.toFixed(2)}) | Total: ${totalFeesNative}sol($${totalFees}) \`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
+        `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(3)}Sol($${pos.collectedFee.toFixed(2)}) |
+                        Uncollected: ${uncollectedFeeNative.toFixed(3)} SOl($${uncollectedFee.toFixed(2)}) |
+                        Total: ${totalFeesNative}sol($${totalFees}) \`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
         `**🪙 Holdings**\n` +
         `• **${pos.tokenName0}:** ${pos.current.amount0Adjusted.toFixed(4)}\n` +
         `• **${pos.tokenName1}:** ${pos.current.amount1Adjusted.toFixed(4)}\n\n` +
@@ -640,7 +642,7 @@ async function createPnLCard(positionData) {
     }
 
     // TIME section
-    ctx.font = 'bold 18px monospace';
+    ctx.font = 'bold 18px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.textAlign = 'left';
     ctx.fillText('TIME', 40, 45);
@@ -648,18 +650,18 @@ async function createPnLCard(positionData) {
     // Time elapsed
     const timeElapsed = utils.getTimeElapsed(positionData.ageHour);
     console.log('Time Elapsed:', timeElapsed);
-    ctx.font = 'bold 42px "Courier New", monospace';
+    ctx.font = 'bold 42px "Courier New", "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(timeElapsed, 40, 95);
 
     // DLMM label
-    ctx.font = 'bold 16px monospace';
+    ctx.font = 'bold 16px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#9CA3AF';
     ctx.fillText('DLMM', 40, 120);
 
     // Token pair name
     const pairName = `${positionData.tokenName0}-${positionData.tokenName1}`;
-    ctx.font = 'bold 52px monospace';
+    ctx.font = 'bold 52px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#FFFFFF';
     ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
     ctx.lineWidth = 2;
@@ -667,7 +669,7 @@ async function createPnLCard(positionData) {
     ctx.fillText(pairName, 40, 170);
 
     // PROFIT label
-    ctx.font = 'bold 18px monospace';
+    ctx.font = 'bold 18px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.fillText('PROFIT', 40, 205);
 
@@ -681,7 +683,7 @@ async function createPnLCard(positionData) {
     ctx.fillRect(35, 230, 400, 60);
     
     // PnL text
-    ctx.font = 'bold 76px monospace';
+    ctx.font = 'bold 76px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = pnlColor;
     ctx.fillText(utils.formatCurrency(pnlValue), 40, 275);
 
@@ -692,13 +694,13 @@ async function createPnLCard(positionData) {
     ctx.arc(500, 50, 8, 0, 2 * Math.PI);
     ctx.fill();
     
-    ctx.font = '16px monospace';
+    ctx.font = '16px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.fillText(positionData.status || 'Unknown', 520, 55);
 
     // Bottom metrics
     const bottomY = 410;
-    ctx.font = '18px monospace';
+    ctx.font = '18px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#D1D5DB';
 
     // TVL
@@ -719,11 +721,11 @@ async function createPnLCard(positionData) {
     const pnlPercent = positionData.pnl?.percentNative || 0;
     const pnlPercentColor = pnlPercent >= 0 ? '#10B981' : '#EF4444';
     ctx.fillStyle = pnlPercentColor;
-    ctx.font = 'bold 20px monospace';
+    ctx.font = 'bold 20px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillText(`PNL ${utils.formatPercentage(pnlPercent/100)}`, width - 40, bottomY);
 
     // Designer credit
-    ctx.font = '12px "DejaVu Sans Mono", "Liberation Mono", monospace';
+    ctx.font = '12px "DejaVu Sans Mono", "Liberation Mono", "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#6B7280';
     ctx.textAlign = 'center';
     ctx.fillText('Broke DAO', width / 2, height - 15);
