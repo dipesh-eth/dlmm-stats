@@ -1,4 +1,5 @@
-import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder } from 'discord.js';
+import { createCanvas, loadImage } from 'canvas';
 import LPAgentClient from './logic.js';
 import fs from 'fs';
 import path from 'path';
@@ -9,6 +10,36 @@ dotenv.config();
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Placeholder for utility functions
+const utils = {
+  getTimeElapsed: (ageHour) => {
+    const hours = parseFloat(ageHour);
+    if (typeof hours !== 'number' || isNaN(hours)) return 'N/A';
+  
+    const totalHours = Math.floor(hours);
+    const days = Math.floor(totalHours / 24);
+    const remainingHours = totalHours % 24;
+    const minutes = Math.floor((ageHour % 1) * 60);
+    const seconds = Math.floor(((ageHour % 1) * 60 - minutes) * 60);
+  
+    // Format each unit to ensure 2 digits
+    const formattedDays = String(days).padStart(2, '0');
+    const formattedHours = String(remainingHours).padStart(2, '0');
+    const formattedMinutes = String(minutes).padStart(2, '0');
+    const formattedSeconds = String(seconds).padStart(2, '0');
+  
+    return `${formattedDays}:${formattedHours}:${formattedMinutes}:${formattedSeconds}`;
+  },
+  formatCurrency: (value) => {
+    if (typeof value !== 'number') value = 0;
+    return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Sol`;
+  },
+  formatPercentage: (value) => {
+    if (typeof value !== 'number') value = 0;
+    return `${(value * 100).toFixed(2)}%`;
+  }
+};
 
 // Configuration from environment variables
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -146,6 +177,15 @@ const commands = [
         .setDescription('Position ID')
         .setRequired(true)
     ),
+  
+  new SlashCommandBuilder()
+    .setName('pnl')
+    .setDescription('Generate a PnL card for a specific position')
+    .addStringOption(option =>
+      option.setName('position_id')
+        .setDescription('Position ID')
+        .setRequired(true)
+    ),
 ].map(command => command.toJSON());
 
 // Register slash commands
@@ -206,6 +246,10 @@ client.on('interactionCreate', async (interaction) => {
       
       case 'position':
         await handlePositionDetails(interaction);
+        break;
+      
+      case 'pnl':
+        await handlePnlCard(interaction);
         break;
     }
   } catch (error) {
@@ -352,6 +396,7 @@ async function handleOpenPositions(interaction) {
     const calculatedValue = (pos.current.amount0Adjusted * pos.price0) + (pos.current.amount1Adjusted * pos.price1);
     const totalFees = parseFloat(pos.collectedFee + uncollectedFee).toFixed(2);
     const totalFeesNative = parseFloat(pos.collectedFeeNative + uncollectedFeeNative).toFixed(3);
+    console.log('inRange:', pos.inRange);
 
     const posEmbed = new EmbedBuilder()
       .setColor(pos.inRange ? '#00ff00' : '#ff0000')
@@ -522,6 +567,170 @@ async function handleHistory(interaction) {
   }
 
   await interaction.editReply({ embeds: [embed] });
+}
+
+async function handlePnlCard(interaction) {
+  const positionId = interaction.options.getString('position_id');
+  const data = await lpAgent.getPositionDetails(positionId);
+
+  if (!data || !data.data) {
+    return interaction.editReply('❌ Could not fetch details for this position.');
+  }
+
+  const positionData = data.data;
+
+  try {
+    // Generate the PnL card
+    const imageBuffer = await createPnLCard(positionData);
+    const attachment = new AttachmentBuilder(imageBuffer, { name: 'pnl-card.png' });
+
+    await interaction.editReply({ files: [attachment] });
+  } catch (error) {
+    console.error('Error generating PnL card:', error);
+    await interaction.editReply('❌ An error occurred while generating the PnL card.');
+  }
+}
+
+// Enhanced PnL card creation
+async function createPnLCard(positionData) {
+    const width = 878;
+    const height = 449;
+    
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Load and draw the background image
+    const backgroundImagePath = path.join(__dirname, 'assets', 'background.png');
+    try {
+        const background = await loadImage(backgroundImagePath);
+        ctx.drawImage(background, 0, 0, width, height);
+    } catch (error) {
+        console.error('Error loading background image:', error);
+        // Fallback to a solid color if the image fails to load
+        ctx.fillStyle = '#0F0B2F';
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    // Load and draw the meteor image
+    const meteorImagePath = path.join(__dirname, 'assets', 'meteor.png');
+    try {
+        const meteor = await loadImage(meteorImagePath);
+        // Adjust the position (x, y) and size (width, height) as needed
+        ctx.drawImage(meteor, 400, 45, 500, 390); 
+    } catch (error) {
+        console.error('Could not load meteor.png:', error);
+        // Continue without the meteor if the image is not found
+    }
+
+    // Add decorative grid pattern
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x <= width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+
+    // TIME section
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = '#E5E7EB';
+    ctx.textAlign = 'left';
+    ctx.fillText('TIME', 40, 45);
+
+    // Time elapsed
+    const timeElapsed = utils.getTimeElapsed(positionData.ageHour);
+    console.log('Time Elapsed:', timeElapsed);
+    ctx.font = 'bold 42px "Courier New", monospace';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(timeElapsed, 40, 95);
+
+    // DLMM label
+    ctx.font = 'bold 16px monospace';
+    ctx.fillStyle = '#9CA3AF';
+    ctx.fillText('DLMM', 40, 120);
+
+    // Token pair name
+    const pairName = `${positionData.tokenName0}-${positionData.tokenName1}`;
+    ctx.font = 'bold 52px monospace';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeText(pairName, 40, 170);
+    ctx.fillText(pairName, 40, 170);
+
+    // PROFIT label
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = '#E5E7EB';
+    ctx.fillText('PROFIT', 40, 205);
+
+    // PnL value
+    const pnlValue = positionData.pnl?.valueNative || 0;
+    const pnlColor = pnlValue >= 0 ? '#10B981' : '#EF4444';
+    const pnlBgColor = pnlValue >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+    
+    // PnL background
+    ctx.fillStyle = pnlBgColor;
+    ctx.fillRect(35, 230, 400, 60);
+    
+    // PnL text
+    ctx.font = 'bold 76px monospace';
+    ctx.fillStyle = pnlColor;
+    ctx.fillText(utils.formatCurrency(pnlValue), 40, 275);
+
+    // Status indicator
+    const statusColor = positionData.status === 'Open' ? '#10B981' : '#6B7280';
+    ctx.fillStyle = statusColor;
+    ctx.beginPath();
+    ctx.arc(500, 50, 8, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    ctx.font = '16px monospace';
+    ctx.fillStyle = '#E5E7EB';
+    ctx.fillText(positionData.status || 'Unknown', 520, 55);
+
+    // Bottom metrics
+    const bottomY = 410;
+    ctx.font = '18px monospace';
+    ctx.fillStyle = '#D1D5DB';
+
+    // TVL
+    ctx.textAlign = 'left';
+    ctx.fillText(`TVL ${utils.formatCurrency(positionData.valueNative)}`, 40, bottomY);
+
+    // BIN STEP
+    const binStep = positionData.poolInfo?.tickSpacing || 100;
+    ctx.textAlign = 'center';
+    ctx.fillText(`BIN STEP ${binStep}`, width / 2 - 100, bottomY);
+
+    // BASE FEE
+    const baseFee = positionData.poolInfo?.fee ? (positionData.poolInfo.fee / 100) : 1;
+    ctx.fillText(`BASE FEE ${utils.formatPercentage(baseFee / 100)}`, width / 2 + 100, bottomY);
+
+    // PNL percentage
+    ctx.textAlign = 'right';
+    const pnlPercent = positionData.pnl?.percentNative || 0;
+    const pnlPercentColor = pnlPercent >= 0 ? '#10B981' : '#EF4444';
+    ctx.fillStyle = pnlPercentColor;
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText(`PNL ${utils.formatPercentage(pnlPercent/100)}`, width - 40, bottomY);
+
+    // Designer credit
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#6B7280';
+    ctx.textAlign = 'center';
+    ctx.fillText('Broke DAO', width / 2, height - 15);
+
+    
+
+    return canvas.toBuffer();
 }
 
 // Login to Discord
