@@ -406,9 +406,7 @@ async function handleOpenPositions(interaction) {
         `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
         `**💰 Current Value:** \`$${calculatedValue.toFixed(4)}\`\n` +
         `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percentNative.toFixed(2)}%\` (*${pnlColor}${pos.pnl.valueNative.toFixed(3)} Sol*)\n` +
-        `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(3)}Sol($${pos.collectedFee.toFixed(2)}) |
-                        Uncollected: ${uncollectedFeeNative.toFixed(3)} SOl($${uncollectedFee.toFixed(2)}) |
-                        Total: ${totalFeesNative}sol($${totalFees}) \`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
+        `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(3)}Sol($${pos.collectedFee.toFixed(2)}) | Uncollected: ${uncollectedFeeNative.toFixed(3)} SOl($${uncollectedFee.toFixed(2)}) | Total: ${totalFeesNative}sol($${totalFees}) \`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
         `**🪙 Holdings**\n` +
         `• **${pos.tokenName0}:** ${pos.current.amount0Adjusted.toFixed(4)}\n` +
         `• **${pos.tokenName1}:** ${pos.current.amount1Adjusted.toFixed(4)}\n\n` +
