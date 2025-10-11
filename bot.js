@@ -642,7 +642,7 @@ async function createPnLCard(positionData) {
     }
 
     // TIME section
-    ctx.font = 'bold 18px Arial';
+    ctx.font = 'bold 18px monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.textAlign = 'left';
     ctx.fillText('TIME', 40, 45);
@@ -655,13 +655,13 @@ async function createPnLCard(positionData) {
     ctx.fillText(timeElapsed, 40, 95);
 
     // DLMM label
-    ctx.font = 'bold 16px Arial';
+    ctx.font = 'bold 16px monospace';
     ctx.fillStyle = '#9CA3AF';
     ctx.fillText('DLMM', 40, 120);
 
     // Token pair name
     const pairName = `${positionData.tokenName0}-${positionData.tokenName1}`;
-    ctx.font = 'bold 52px Arial';
+    ctx.font = 'bold 52px monospace';
     ctx.fillStyle = '#FFFFFF';
     ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
     ctx.lineWidth = 2;
@@ -669,7 +669,7 @@ async function createPnLCard(positionData) {
     ctx.fillText(pairName, 40, 170);
 
     // PROFIT label
-    ctx.font = 'bold 18px Arial';
+    ctx.font = 'bold 18px monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.fillText('PROFIT', 40, 205);
 
@@ -683,7 +683,7 @@ async function createPnLCard(positionData) {
     ctx.fillRect(35, 230, 400, 60);
     
     // PnL text
-    ctx.font = 'bold 76px Arial';
+    ctx.font = 'bold 76px monospace';
     ctx.fillStyle = pnlColor;
     ctx.fillText(utils.formatCurrency(pnlValue), 40, 275);
 
@@ -694,13 +694,13 @@ async function createPnLCard(positionData) {
     ctx.arc(500, 50, 8, 0, 2 * Math.PI);
     ctx.fill();
     
-    ctx.font = '16px Arial';
+    ctx.font = '16px monospace';
     ctx.fillStyle = '#E5E7EB';
     ctx.fillText(positionData.status || 'Unknown', 520, 55);
 
     // Bottom metrics
     const bottomY = 410;
-    ctx.font = '18px Arial';
+    ctx.font = '18px monospace';
     ctx.fillStyle = '#D1D5DB';
 
     // TVL
@@ -721,11 +721,11 @@ async function createPnLCard(positionData) {
     const pnlPercent = positionData.pnl?.percentNative || 0;
     const pnlPercentColor = pnlPercent >= 0 ? '#10B981' : '#EF4444';
     ctx.fillStyle = pnlPercentColor;
-    ctx.font = 'bold 20px Arial';
+    ctx.font = 'bold 20px monospace';
     ctx.fillText(`PNL ${utils.formatPercentage(pnlPercent/100)}`, width - 40, bottomY);
 
     // Designer credit
-    ctx.font = '12px Arial';
+    ctx.font = '12px monospace';
     ctx.fillStyle = '#6B7280';
     ctx.textAlign = 'center';
     ctx.fillText('Broke DAO', width / 2, height - 15);
