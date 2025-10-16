@@ -397,14 +397,19 @@ async function handleOpenPositions(interaction) {
     const calculatedValue = (pos.current.amount0Adjusted * pos.price0) + (pos.current.amount1Adjusted * pos.price1);
     const totalFees = parseFloat(pos.collectedFee + uncollectedFee).toFixed(2);
     const totalFeesNative = parseFloat(pos.collectedFeeNative + uncollectedFeeNative).toFixed(3);
-    console.log('inRange:', pos.inRange);
+    
+    // New logic to determine if the position is in range from API ticks
+    const tickLower = pos.range[0];
+    const tickUpper = pos.range[1];
+    const currentTick = pos.range[2];
+    const isInRange = currentTick >= tickLower && currentTick <= tickUpper;
 
     const posEmbed = new EmbedBuilder()
-      .setColor(pos.inRange ? '#00ff00' : '#ff0000')
+      .setColor(isInRange ? '#00ff00' : '#ff0000')
       .setTitle(`💧 ${pos.protocol.charAt(0).toUpperCase() + pos.protocol.slice(1)} | ${pos.tokenName0}/${pos.tokenName1}`)
       .setDescription(
         `**💼 Position ID:** \`${shortPositionId}\`\n` +
-        `**📊 Status:** ${pos.inRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
+        `**📊 Status:** ${isInRange ? '✅ *In Range*' : '⚠️ *Out of Range*'} — *Active for ${pos.age} days*\n\n` +
         `**💰 Current Value:** \`$${calculatedValue.toFixed(4)}\`\n` +
         `**${pnlSign} PnL:** \`${pnlColor}${pos.pnl.percentNative.toFixed(2)}%\` (*${pnlColor}${pos.pnl.valueNative.toFixed(3)} Sol*)\n` +
         `**💵 Fees:** \`Collected: ${pos.collectedFeeNative.toFixed(3)}Sol($${pos.collectedFee.toFixed(2)}) | Uncollected: ${uncollectedFeeNative.toFixed(3)} SOl($${uncollectedFee.toFixed(2)}) | Total: ${totalFeesNative}sol($${totalFees}) \`${uncollectedFee > 0 ? ' 💰' : ''}\n\n` +
@@ -746,7 +751,7 @@ async function createPnLCard(positionData) {
     // DLMM label
     ctx.font = 'bold 16px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#9CA3AF';
-    ctx.fillText('DLMM', 40, 120);
+    ctx.fillText('POOL', 40, 120);
 
     // Token pair name
     const pairName = `${positionData.tokenName0}-${positionData.tokenName1}`;
@@ -760,7 +765,7 @@ async function createPnLCard(positionData) {
     // PROFIT label
     ctx.font = 'bold 18px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = '#E5E7EB';
-    ctx.fillText('PROFIT', 40, 205);
+    ctx.fillText('PROFIT', 40, 285);
 
     // PnL value
     const pnlValue = positionData.pnl?.valueNative || 0;
@@ -769,12 +774,12 @@ async function createPnLCard(positionData) {
     
     // PnL background
     ctx.fillStyle = pnlBgColor;
-    ctx.fillRect(35, 230, 400, 60);
+    ctx.fillRect(35, 300, 400, 60);
     
     // PnL text
     ctx.font = 'bold 76px "DejaVu Sans Mono", "Liberation Mono", monospace';
     ctx.fillStyle = pnlColor;
-    ctx.fillText(utils.formatCurrency(pnlValue), 40, 275);
+    ctx.fillText(utils.formatCurrency(pnlValue), 40, 355);
 
     // Status indicator
     const statusColor = positionData.status === 'Open' ? '#10B981' : '#6B7280';
