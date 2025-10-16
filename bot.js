@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder, ComponentType } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
 import LPAgentClient from './logic.js';
 import { getPositionIdFromTx } from './helius.js';
@@ -541,6 +541,7 @@ async function handleHistory(interaction) {
   const pagination = data.data.pagination;
   const shortWallet = walletAddress.substring(0, 8) + '...' + walletAddress.substring(walletAddress.length - 8);
 
+  // --- Create the Embed ---
   let description = `**👛 Wallet:** \`${shortWallet}\`\n\n` +
                    `**📄 Page ${pagination.currentPage}/${pagination.totalPages}** | **📊 Total:** ${pagination.totalCount} positions\n\n`;
 
@@ -550,11 +551,9 @@ async function handleHistory(interaction) {
     const posNum = (pagination.currentPage - 1) * pagination.pageSize + idx + 1;
     
     description += `**${posNum}. ${pos.tokenName0}/${pos.tokenName1} ${pnlSign}**\n` +
-                   `• **PnL:** ${pnlColor}${pos.pnl.percentNative.toFixed(2)}% (${pnlColor}$${pos.pnl.value.toFixed(2)})\n` +
+                   `• **PnL:** ${pnlColor}${(pos.pnl.percentNative).toFixed(2)}% (${pnlColor}$${pos.pnl.valueNative.toFixed(3)})\n` +
                    `• **Fees:** ${pos.collectedFeeNative.toFixed(2)} Sol\n` +
-                   `• **Duration:** ${pos.age} days\n` +
-                   `• **Opened:** ${new Date(pos.createdAt).toLocaleDateString()}\n` +
-                   `• **Closed:** ${new Date(pos.closeAt).toLocaleDateString()}\n\n`;
+                   `• **Position ID:** \`${pos.position.substring(0, 6)}...\`\n\n`;
   });
 
   const embed = new EmbedBuilder()
@@ -567,7 +566,71 @@ async function handleHistory(interaction) {
     embed.setFooter({ text: `Use /history wallet:<wallet> page:<number> to view other pages` });
   }
 
-  await interaction.editReply({ embeds: [embed] });
+  // --- Create the Select Menu ---
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId('history_pnl_select')
+    .setPlaceholder('Generate a PnL card for a position...');
+
+  positions.forEach((pos, idx) => {
+    const posNum = (pagination.currentPage - 1) * pagination.pageSize + idx + 1;
+    selectMenu.addOptions({
+      label: `${posNum}. ${pos.tokenName0}/${pos.tokenName1}`,
+      description: `PnL: ${pos.pnl.value.toFixed(2)} | Fees: ${pos.collectedFeeNative.toFixed(2)} Sol`,
+      value: pos.position, // Store the full position ID as the value
+    });
+  });
+
+  const row = new ActionRowBuilder().addComponents(selectMenu);
+
+  // --- Send the Message and Set up a Collector ---
+  const message = await interaction.editReply({ embeds: [embed], components: [row] });
+
+  const collector = message.createMessageComponentCollector({
+    componentType: ComponentType.StringSelect,
+    filter: i => i.user.id === interaction.user.id && i.customId === 'history_pnl_select',
+    time: 90000 // 90 seconds
+  });
+
+  collector.on('collect', async i => {
+    try {
+      // Acknowledge the interaction immediately to prevent a "failed" state
+      await i.deferUpdate();
+      
+      const positionId = i.values[0];
+      
+      const positionDetailsData = await lpAgent.getPositionDetails(positionId);
+      if (!positionDetailsData || !positionDetailsData.data) {
+        // Send a private error message if details can't be fetched
+        await i.followUp({ content: '❌ Could not fetch position details to generate the card.', ephemeral: true });
+        return;
+      }
+
+      const imageBuffer = await createPnLCard(positionDetailsData.data);
+      const attachment = new AttachmentBuilder(imageBuffer, { name: 'pnl-card.png' });
+
+      // Send the card as a NEW, PUBLIC message in the channel
+      await interaction.followUp({
+        content: `PnL card for position \`${positionId.substring(0, 8)}...\` requested by ${i.user}:`,
+        files: [attachment]
+      });
+
+      // Stop the collector after one successful use
+      collector.stop();
+
+    } catch (error) {
+      console.error('Error in history PnL collector:', error);
+      // Send a private error message for any other failures
+      await i.followUp({ content: '❌ An error occurred while generating the PnL card.', ephemeral: true });
+    }
+  });
+
+  collector.on('end', collected => {
+    // Disable the select menu after the collector expires or is stopped
+    const disabledRow = new ActionRowBuilder().addComponents(
+      selectMenu.setDisabled(true)
+    );
+    interaction.editReply({ components: [disabledRow] }).catch(() => {}); // Ignore errors if message was deleted
+  });
 }
 
 async function handlePnlCard(interaction) {
