@@ -2,6 +2,8 @@ import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Rou
 import { createCanvas, loadImage } from 'canvas';
 import LPAgentClient from './logic.js';
 import { getPositionIdFromTx } from './helius.js';
+import { initializeDatabase, setupWallet, addMonitor, getUserMonitors, removeMonitor, getAllActiveMonitors, getEncryptedKey, updateMonitorStatus } from './src/database.js';
+import { encrypt } from './src/encryption.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -122,8 +124,41 @@ const lpAgent = new LPAgentClient(LPAGENT_API_KEY);
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
+    .setName('monitor')
+    .setDescription('Manage TP/SL monitors for your DLMM positions.')
+    .addSubcommand(sub =>
+      sub.setName('add')
+        .setDescription('Create a new TP/SL monitor.')
+        .addStringOption(opt => opt.setName('symbol').setDescription('Token symbol for tracking (e.g., GUAC)').setRequired(true))
+        .addStringOption(opt => opt.setName('mint_address').setDescription('The mint address of the token to monitor.').setRequired(true))
+        .addStringOption(opt => opt.setName('pool_address').setDescription('The address of the Meteora DLMM pool.').setRequired(true))
+        .addNumberOption(opt => opt.setName('tp_price').setDescription('The take-profit price.').setRequired(true))
+        .addNumberOption(opt => opt.setName('sl_price').setDescription('The stop-loss price.').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName('status')
+        .setDescription('View all your active monitors.')
+    )
+    .addSubcommand(sub =>
+      sub.setName('remove')
+        .setDescription('Remove a monitor.')
+        .addIntegerOption(opt => opt.setName('monitor_id').setDescription('The ID of the monitor to remove (from /monitor status).').setRequired(true))
+    ),
+  new SlashCommandBuilder()
+    .setName('wallet')
+    .setDescription('Manage your secure wallet for the TP/SL bot.')
+    .addSubcommand(sub =>
+      sub.setName('setup')
+        .setDescription('Securely save your wallet private key. USE IN DMs ONLY.')
+        .addStringOption(opt =>
+          opt.setName('private_key')
+            .setDescription('Your wallet private key (BS58 format). This is encrypted and stored securely.')
+            .setRequired(true)
+        )
+    ),
+  new SlashCommandBuilder()
     .setName('register_wallet')
-    .setDescription('Register your default wallet address')
+    .setDescription('Register your default wallet address for PnL tracking')
     .addStringOption(option =>
       option.setName('wallet')
         .setDescription('Your wallet address')
@@ -205,12 +240,134 @@ async function registerCommands() {
   }
 }
 
+import { decrypt } from './encryption.js';
+import { executePositionClose } from './src/execution.js';
+
+const CHECK_INTERVAL = 30 * 1000; // 30 seconds
+
+// ============================================
+// BACKGROUND MONITORING LOOP
+// ============================================
+
+async function fetchCurrentPrice(mintAddress) {
+  // Using Jupiter's v4 price API
+  const url = `https://price.jup.ag/v4/price?ids=${mintAddress}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.warn(`[Price Fetch] Failed to fetch price for ${mintAddress}: HTTP ${response.status}`);
+      return null;
+    }
+    const data = await response.json();
+    if (data.data && data.data[mintAddress]) {
+      return data.data[mintAddress].price;
+    }
+    return null;
+  } catch (error) {
+    console.error(`[Price Fetch] Error fetching price for ${mintAddress}:`, error);
+    return null;
+  }
+}
+
+function checkTrigger(currentPrice, tpPrice, slPrice) {
+  if (currentPrice >= tpPrice) return 'TP';
+  if (currentPrice <= slPrice) return 'SL';
+  return null;
+}
+
+async function startMonitoringLoop(client) {
+  console.log(`[Monitor] Starting background monitoring loop (Interval: ${CHECK_INTERVAL / 1000}s)`);
+
+  setInterval(async () => {
+    const monitors = await getAllActiveMonitors();
+    if (monitors.length === 0) return;
+
+    console.log(`[Monitor] Checking ${monitors.length} active position(s)...`);
+
+    for (const monitor of monitors) {
+      const currentPrice = await fetchCurrentPrice(monitor.mint_address);
+      if (currentPrice === null) {
+        continue; // Skip if price fetch fails
+      }
+
+      const triggerType = checkTrigger(currentPrice, monitor.tp_price, monitor.sl_price);
+
+      if (triggerType) {
+        console.log(`[Monitor] TRIGGER! User: ${monitor.user_discord_id}, Pool: ${monitor.pool_address}, Type: ${triggerType}`);
+
+        const encryptedKey = await getEncryptedKey(monitor.user_discord_id);
+        if (!encryptedKey) {
+          console.error(`[Monitor] Critical: Trigger for user ${monitor.user_discord_id} but no key found.`);
+          continue;
+        }
+
+        let user;
+        try {
+          user = await client.users.fetch(monitor.user_discord_id);
+        } catch {
+          console.error(`[Monitor] Could not fetch user ${monitor.user_discord_id}. Cannot send DM.`);
+        }
+
+        try {
+          const privateKey = decrypt(encryptedKey);
+
+          const result = await executePositionClose(
+            monitor,
+            triggerType,
+            currentPrice,
+            privateKey,
+            process.env.RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com'
+          );
+
+          if (result.success) {
+            await updateMonitorStatus(monitor.id, 'closed');
+            console.log(`[Monitor] Successfully closed position for ${monitor.user_discord_id}. DB status updated.`);
+            if (user) {
+              user.send(`✅ **Position Closed!**\nYour monitor for **${monitor.token_symbol}** was triggered as a **${triggerType}** at price **$${currentPrice.toFixed(6)}**.\n\nTransaction: \`${result.signature}\``).catch(e => console.error("Failed to send success DM."));
+            }
+          } else {
+            console.error(`[Monitor] Execution failed for ${monitor.user_discord_id}:`, result.error);
+            if (user) {
+              user.send(`❌ **Execution Failed!**\nYour monitor for **${monitor.token_symbol}** was triggered, but the transaction failed to execute.\n\nError: \`${result.error}\`\n\nThe bot will not try again. Please check your position manually.`).catch(e => console.error("Failed to send failure DM."));
+              // We close it even on failure to prevent spamming the user on every loop
+              await updateMonitorStatus(monitor.id, 'closed');
+            }
+          }
+        } catch (e) {
+          const error = e;
+          console.error(`[Monitor] CRITICAL FAILURE during execution for ${monitor.user_discord_id}:`, error.message);
+          if (user) {
+            user.send(`❌ **Critical Bot Error!**\nYour monitor for **${monitor.token_symbol}** was triggered, but a critical error occurred (e.g., key decryption failed).\n\nPlease check your position manually. The monitor has been disabled.`).catch(e => console.error("Failed to send critical failure DM."));
+            await updateMonitorStatus(monitor.id, 'closed');
+          }
+        }
+      }
+    }
+  }, CHECK_INTERVAL);
+}
+
 // Bot ready event
 client.once('ready', async () => {
   console.log(`✅ Bot logged in as ${client.user.tag}`);
-  console.log(`📊 LP Agent API connected`);
-  initWalletStorage();
-  await registerCommands();
+  
+  try {
+    // Initialize backend services
+    await initializeDatabase();
+    console.log('✅ Database connected successfully.');
+    
+    // Initialize wallet storage and register commands
+    initWalletStorage();
+    await registerCommands();
+    
+    // Start the main monitoring loop
+    startMonitoringLoop(client);
+    
+    console.log('🚀 Bot is fully initialized and ready.');
+
+  } catch (error) {
+    console.error('❌ Bot failed to start due to a backend error:', error);
+    process.exit(1); // Exit if critical services fail
+  }
 });
 
 // Interaction handler
@@ -252,6 +409,26 @@ client.on('interactionCreate', async (interaction) => {
       case 'pnl':
         await handlePnlCard(interaction);
         break;
+      
+      case 'wallet':
+        if (interaction.options.getSubcommand() === 'setup') {
+          await handleWalletSetup(interaction);
+        }
+        break;
+
+      case 'monitor':
+        switch (interaction.options.getSubcommand()) {
+          case 'add':
+            await handleAddMonitor(interaction);
+            break;
+          case 'status':
+            await handleMonitorStatus(interaction);
+            break;
+          case 'remove':
+            await handleRemoveMonitor(interaction);
+            break;
+        }
+        break;
     }
   } catch (error) {
     console.error('Error handling command:', error);
@@ -265,7 +442,119 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+// === TP/SL COMMAND HANDLERS ===
+
+async function handleAddMonitor(interaction) {
+  const monitor = {
+    user_discord_id: interaction.user.id,
+    pool_address: interaction.options.getString('pool_address'),
+    token_symbol: interaction.options.getString('symbol'),
+    mint_address: interaction.options.getString('mint_address'),
+    tp_price: interaction.options.getNumber('tp_price'),
+    sl_price: interaction.options.getNumber('sl_price'),
+  };
+
+  try {
+    const key = await getEncryptedKey(interaction.user.id);
+    if (!key) {
+      await interaction.editReply({ content: '❌ You must set up a wallet first using `/wallet setup` in DMs.', ephemeral: true });
+      return;
+    }
+
+    if (monitor.sl_price >= monitor.tp_price) {
+        await interaction.editReply({ content: '❌ Stop-loss price must be less than the take-profit price.', ephemeral: true });
+        return;
+    }
+
+    const result = await addMonitor(monitor);
+    await interaction.editReply({ content: `✅ **Monitor created!**\nYour new monitor for **${monitor.token_symbol}** has been created with ID: \`${result.id}\`.`, ephemeral: true });
+  } catch (error) {
+    console.error('Failed to add monitor:', error);
+    await interaction.editReply({ content: '❌ An error occurred while adding the monitor.', ephemeral: true });
+  }
+}
+
+async function handleMonitorStatus(interaction) {
+  try {
+    const monitors = await getUserMonitors(interaction.user.id);
+    if (monitors.length === 0) {
+      await interaction.editReply({ content: 'ℹ️ You have no active monitors. Use `/monitor add` to create one.', ephemeral: true });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor('#4a90e2')
+      .setTitle('📊 Your Active Monitors')
+      .setTimestamp();
+
+    let description = '';
+    monitors.forEach(m => {
+      description += `**ID: ${m.id}** - **${m.token_symbol}**\n` +
+                     `> Pool: \`${m.pool_address.substring(0, 12)}...\`\n` +
+                     `> TP Price: \`$${m.tp_price}\`\n` +
+                     `> SL Price: \`$${m.sl_price}\`\n\n`;
+    });
+    embed.setDescription(description);
+
+    await interaction.editReply({ embeds: [embed], ephemeral: true });
+  } catch (error) {
+    console.error('Failed to get monitor status:', error);
+    await interaction.editReply({ content: '❌ An error occurred while fetching your monitors.', ephemeral: true });
+  }
+}
+
+async function handleRemoveMonitor(interaction) {
+  const monitorId = interaction.options.getInteger('monitor_id');
+  try {
+    const changes = await removeMonitor(monitorId, interaction.user.id);
+    if (changes > 0) {
+      await interaction.editReply({ content: `✅ Monitor with ID \`${monitorId}\` has been successfully removed.`, ephemeral: true });
+    } else {
+      await interaction.editReply({ content: `❌ No active monitor found with ID \`${monitorId}\` under your account. Check your \`/monitor status\`.`, ephemeral: true });
+    }
+  } catch (error) {
+    console.error('Failed to remove monitor:', error);
+    await interaction.editReply({ content: '❌ An error occurred while removing the monitor.', ephemeral: true });
+  }
+}
+
+
 // === COMMAND HANDLERS ===
+
+async function handleWalletSetup(interaction) {
+  // 1. Enforce DM-only for security
+  if (interaction.inGuild()) {
+    await interaction.editReply({
+      content: '⚠️ For your security, the `/wallet setup` command can only be used in a Direct Message with me.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const privateKey = interaction.options.getString('private_key');
+  const discordId = interaction.user.id;
+
+  try {
+    // 2. Encrypt the key immediately
+    const encryptedKey = encrypt(privateKey);
+
+    // 3. Save to the database
+    await setupWallet(discordId, encryptedKey);
+
+    // 4. Send a secure, ephemeral confirmation
+    await interaction.editReply({
+      content: '✅ Your wallet has been securely encrypted and saved. You can now use the `/monitor` commands in the server to manage your positions.',
+      ephemeral: true,
+    });
+  } catch (error) {
+    console.error(`Failed to setup wallet for user ${discordId}:`, error);
+    await interaction.editReply({
+      content: '❌ An error occurred while saving your wallet. Please ensure you have provided a valid private key and try again.',
+      ephemeral: true,
+    });
+  }
+}
+
 
 // Wallet management handlers
 async function handleRegisterWallet(interaction) {
