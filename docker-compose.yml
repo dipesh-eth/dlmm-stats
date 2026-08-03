@@ -1,18 +1,18 @@
 version: '3.8'
 
 services:
-  lpagent-bot:
+  meteora-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: lpagent-discord-bot
+    container_name: meteora-discord-bot
     restart: unless-stopped
     environment:
       # Discord Configuration
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - CLIENT_ID=${CLIENT_ID}
-      # LP Agent API
-      - LPAGENT_API_KEY=${LPAGENT_API_KEY}
+      # Meteora DLMM Data API
+      - METEORA_API_BASE=${METEORA_API_BASE:-https://dlmm.datapi.meteora.ag}
       # Helius RPC
       - HELIUS_API_KEY=${HELIUS_API_KEY}
       # Node Environment

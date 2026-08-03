@@ -27,6 +27,7 @@ type TokenStatus = 'monitoring' | 'close_in_progress' | 'closed';
 interface TokenConfig {
   tokenSymbol: string;
   tokenMintAddress: string;
+  poolAddress?: string;
   tpPrice: number;
   slPrice: number;
 }
@@ -280,12 +281,14 @@ function validateToken(token: TokenConfig): string | null {
 }
 
 async function fetchCurrentPrice(token: TokenConfig): Promise<number | null> {
-    const url = `https://lite-api.jup.ag/price/v3?ids=${token.tokenMintAddress}`;
+    const poolAddress = token.poolAddress || token.tokenMintAddress;
+    const baseUrl = (process.env.METEORA_API_BASE || 'https://dlmm.datapi.meteora.ag').replace(/\/$/, '');
+    const url = `${baseUrl}/pools/${poolAddress}`;
     try {
         const response = await fetch(url);
         if (!response.ok) return null;
         const data = await response.json();
-        return data[token.tokenMintAddress]?.usdPrice || null;
+        return typeof data?.current_price === 'number' ? data.current_price : null;
     } catch (error) {
         return null;
     }
@@ -307,4 +310,3 @@ function formatPrice(price: number): string {
     if (price < 1) return price.toFixed(6);
     return price.toFixed(4);
 }
-

@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder, ComponentType } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
-import LPAgentClient from './logic.js';
+import MeteoraClient from './logic.js';
 import { getPositionIdFromTx } from './helius.js';
 import { initializeDatabase, setupWallet, addMonitor, getUserMonitors, removeMonitor, getAllActiveMonitors, getEncryptedKey, updateMonitorStatus } from './src/database.js';
 import { encrypt } from './src/encryption.js';
@@ -47,12 +47,11 @@ const utils = {
 // Configuration from environment variables
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const LPAGENT_API_KEY = process.env.LPAGENT_API_KEY;
 
 // Validate environment variables
-if (!DISCORD_TOKEN || !CLIENT_ID || !LPAGENT_API_KEY) {
+if (!DISCORD_TOKEN || !CLIENT_ID) {
   console.error('❌ Missing required environment variables!');
-  console.error('Please set: DISCORD_TOKEN, CLIENT_ID, LPAGENT_API_KEY');
+  console.error('Please set: DISCORD_TOKEN, CLIENT_ID');
   process.exit(1);
 }
 
@@ -119,7 +118,7 @@ const client = new Client({
   ],
 });
 
-const lpAgent = new LPAgentClient(LPAGENT_API_KEY);
+const meteora = new MeteoraClient();
 
 // Define slash commands
 const commands = [
@@ -212,6 +211,11 @@ const commands = [
       option.setName('position_id')
         .setDescription('Position ID')
         .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('wallet')
+        .setDescription('Wallet address (optional if you have registered)')
+        .setRequired(false)
     ),
   
   new SlashCommandBuilder()
@@ -249,22 +253,12 @@ const CHECK_INTERVAL = 30 * 1000; // 30 seconds
 // BACKGROUND MONITORING LOOP
 // ============================================
 
-async function fetchCurrentPrice(mintAddress) {
-  // Using Jupiter's v4 price API
-  const url = `https://price.jup.ag/v4/price?ids=${mintAddress}`;
+async function fetchCurrentPrice(poolAddress) {
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.warn(`[Price Fetch] Failed to fetch price for ${mintAddress}: HTTP ${response.status}`);
-      return null;
-    }
-    const data = await response.json();
-    if (data.data && data.data[mintAddress]) {
-      return data.data[mintAddress].price;
-    }
-    return null;
+    const pool = await meteora.getPool(poolAddress);
+    return typeof pool?.current_price === 'number' ? pool.current_price : null;
   } catch (error) {
-    console.error(`[Price Fetch] Error fetching price for ${mintAddress}:`, error);
+    console.error(`[Price Fetch] Error fetching Meteora pool price for ${poolAddress}:`, error);
     return null;
   }
 }
@@ -285,7 +279,7 @@ async function startMonitoringLoop(client) {
     console.log(`[Monitor] Checking ${monitors.length} active position(s)...`);
 
     for (const monitor of monitors) {
-      const currentPrice = await fetchCurrentPrice(monitor.mint_address);
+      const currentPrice = await fetchCurrentPrice(monitor.pool_address);
       if (currentPrice === null) {
         continue; // Skip if price fetch fails
       }
@@ -657,7 +651,7 @@ async function handleOpenPositions(interaction) {
     }
     throw error;
   }
-  const data = await lpAgent.getOpenPositions(walletAddress);
+  const data = await meteora.getOpenPositions(walletAddress);
   
   if (!data.data || data.data.length === 0) {
     return interaction.editReply('📭 No open positions found for this wallet.');
@@ -727,7 +721,17 @@ async function handleOpenPositions(interaction) {
 
 async function handlePositionDetails(interaction) {
   const positionId = interaction.options.getString('position_id');
-  const data = await lpAgent.getPositionDetails(positionId);
+  let walletAddress;
+  try {
+    walletAddress = getWalletAddress(interaction);
+  } catch (error) {
+    if (error.message === 'NO_WALLET') {
+      return interaction.editReply('Meteora requires wallet context for position PnL. Use `/register_wallet` or pass wallet.');
+    }
+    throw error;
+  }
+
+  const data = await meteora.getPositionDetails(positionId, { wallet: walletAddress });
   
   if (!data || !data.data) {
     return interaction.editReply('❌ Could not fetch details for this position.');
@@ -771,7 +775,7 @@ async function handleOverview(interaction) {
     throw error;
   }
   
-  const data = await lpAgent.getOverview(walletAddress);
+  const data = await meteora.getOverview(walletAddress);
   
   if (!data || !data.data) {
     return interaction.editReply('❌ Could not fetch overview data for this wallet.');
@@ -825,7 +829,7 @@ async function handleHistory(interaction) {
   }
   
   const page = interaction.options.getInteger('page') || 1;
-  const data = await lpAgent.getHistoricalPositions(walletAddress, { page, pageSize: 10 });
+  const data = await meteora.getHistoricalPositions(walletAddress, { page, pageSize: 10 });
   
   if (!data.data || !data.data.data || data.data.data.length === 0) {
     return interaction.editReply('📭 No historical positions found for this wallet.');
@@ -892,7 +896,7 @@ async function handleHistory(interaction) {
       
       const positionId = i.values[0];
       
-      const positionDetailsData = await lpAgent.getPositionDetails(positionId);
+      const positionDetailsData = await meteora.getPositionDetails(positionId, { wallet: walletAddress });
       if (!positionDetailsData || !positionDetailsData.data) {
         // Send a private error message if details can't be fetched
         await i.followUp({ content: '❌ Could not fetch position details to generate the card.', ephemeral: true });
@@ -957,7 +961,12 @@ async function handlePnlCard(interaction) {
     return interaction.editReply('❌ Could not find a valid position ID in that transaction. Please make sure it is the correct transaction.');
   }
 
-  const data = await lpAgent.getPositionDetails(positionId);
+  const walletAddress = getUserWallet(interaction.user.id);
+  if (!walletAddress) {
+    return interaction.editReply('Meteora requires wallet context for position PnL. Use `/register_wallet` before `/pnl`.');
+  }
+
+  const data = await meteora.getPositionDetails(positionId, { wallet: walletAddress });
 
   if (!data || !data.data) {
     return interaction.editReply('❌ Could not fetch position details from the API using the found ID.');
