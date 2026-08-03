@@ -120,6 +120,30 @@ const client = new Client({
 
 const meteora = new MeteoraClient();
 
+function isUnknownInteractionError(error) {
+  return error?.code === 10062 || error?.rawError?.code === 10062;
+}
+
+async function sendCommandError(interaction, message) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(message);
+    } else {
+      await interaction.reply({ content: message, ephemeral: true });
+    }
+  } catch (error) {
+    if (isUnknownInteractionError(error)) {
+      console.warn(`[Discord] Interaction expired before an error response could be sent: ${interaction.commandName}`);
+      return;
+    }
+    throw error;
+  }
+}
+
+client.on('error', error => {
+  console.error('[Discord] Client error:', error);
+});
+
 // Define slash commands
 const commands = [
   new SlashCommandBuilder()
@@ -425,14 +449,15 @@ client.on('interactionCreate', async (interaction) => {
         break;
     }
   } catch (error) {
+    if (isUnknownInteractionError(error)) {
+      console.warn(`[Discord] Interaction expired before acknowledgement: ${interaction.commandName}`);
+      return;
+    }
+
     console.error('Error handling command:', error);
     const errorMessage = '❌ An error occurred while fetching data. Please check the input and try again.';
     
-    if (interaction.deferred) {
-      await interaction.editReply(errorMessage);
-    } else {
-      await interaction.reply({ content: errorMessage, ephemeral: true });
-    }
+    await sendCommandError(interaction, errorMessage);
   }
 });
 
