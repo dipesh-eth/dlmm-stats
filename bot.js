@@ -609,7 +609,7 @@ async function handleMyWallet(interaction) {
   }
 
   const embed = new EmbedBuilder()
-    .setColor('#4a90e2')
+    .setColor(totals.pnlSol >= 0 ? '#00ff00' : '#ff0000')
     .setTitle('👛 Your Registered Wallet')
     .addFields({
       name: '📍 Wallet Address',
@@ -659,6 +659,25 @@ async function handleOpenPositions(interaction) {
 
   const positions = data.data;
   const embeds = [];
+  const totals = positions.reduce((acc, pos) => {
+    acc.investedUsd += Number(pos.inputValue || 0);
+    acc.investedSol += Number(pos.inputNative || 0);
+    acc.unclaimedFeesUsd += Number(pos.unCollectedFee || 0);
+    acc.unclaimedFeesSol += Number(pos.unCollectedFeeNative || 0);
+    acc.pnlUsd += Number(pos.pnl?.value || 0);
+    acc.pnlSol += Number(pos.pnl?.valueNative || 0);
+    return acc;
+  }, {
+    investedUsd: 0,
+    investedSol: 0,
+    unclaimedFeesUsd: 0,
+    unclaimedFeesSol: 0,
+    pnlUsd: 0,
+    pnlSol: 0,
+  });
+  const totalPnlSign = totals.pnlSol >= 0 ? 'ðŸ“ˆ' : 'ðŸ“‰';
+  const totalPnlColor = totals.pnlSol >= 0 ? '+' : '';
+  const totalPnlLabel = totals.pnlSol >= 0 ? 'UP' : 'DOWN';
 
   // Summary embed
   const summaryEmbed = new EmbedBuilder()
@@ -666,6 +685,45 @@ async function handleOpenPositions(interaction) {
     .setTitle('💼 Open LP Positions')
     .setDescription(`**👛 Wallet:** \`${walletAddress.substring(0, 8)}...${walletAddress.substring(walletAddress.length - 6)}\`\n\n**📊 Total Open Positions:** ${data.count}`)
     .setTimestamp();
+
+  summaryEmbed.addFields(
+    {
+      name: 'ðŸ’µ Total Invested',
+      value: `\`${totals.investedSol.toFixed(3)} Sol ($${totals.investedUsd.toFixed(2)})\``,
+      inline: false,
+    },
+    {
+      name: 'ðŸ’¸ Total Unclaimed Fees',
+      value: `\`${totals.unclaimedFeesSol.toFixed(3)} Sol ($${totals.unclaimedFeesUsd.toFixed(2)})\``,
+      inline: false,
+    },
+    {
+      name: `${totalPnlSign} Current Positions PnL`,
+      value: `\`${totalPnlColor}${totals.pnlSol.toFixed(3)} Sol (${totalPnlColor}$${totals.pnlUsd.toFixed(2)})\``,
+      inline: false,
+    },
+  );
+  summaryEmbed
+    .setColor(totals.pnlSol >= 0 ? '#00ff00' : '#ff0000')
+    .spliceFields(
+      0,
+      3,
+      {
+        name: 'Total Invested',
+        value: `\`${totals.investedSol.toFixed(3)} Sol ($${totals.investedUsd.toFixed(2)})\``,
+        inline: false,
+      },
+      {
+        name: 'Total Unclaimed Fees',
+        value: `\`${totals.unclaimedFeesSol.toFixed(3)} Sol ($${totals.unclaimedFeesUsd.toFixed(2)})\``,
+        inline: false,
+      },
+      {
+        name: `${totalPnlLabel} Current Positions PnL`,
+        value: `\`${totalPnlColor}${totals.pnlSol.toFixed(3)} Sol (${totalPnlColor}$${totals.pnlUsd.toFixed(2)})\``,
+        inline: false,
+      },
+    );
 
   embeds.push(summaryEmbed);
 
@@ -688,7 +746,7 @@ async function handleOpenPositions(interaction) {
     const isInRange = currentTick >= tickLower && currentTick <= tickUpper;
 
     const posEmbed = new EmbedBuilder()
-      .setColor(isInRange ? '#00ff00' : '#ff0000')
+      .setColor(pos.pnl.valueNative >= 0 ? '#00ff00' : '#ff0000')
       .setTitle(`💧 ${pos.protocol.charAt(0).toUpperCase() + pos.protocol.slice(1)} | ${pos.tokenName0}/${pos.tokenName1}`)
       .setDescription(
         `**💼 Position ID:** \`${shortPositionId}\`\n` +
