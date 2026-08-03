@@ -240,7 +240,7 @@ async function registerCommands() {
   }
 }
 
-import { decrypt } from './encryption.js';
+import { decrypt } from './src/encryption.js';
 import { executePositionClose } from './src/execution.js';
 
 const CHECK_INTERVAL = 30 * 1000; // 30 seconds

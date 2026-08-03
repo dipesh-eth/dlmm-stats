@@ -5,10 +5,18 @@
 // ============================================
 
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import DLMM from '@meteora-ag/dlmm';
 import BN from 'bn.js';
-import * as fs from 'fs';
-const bs58 = require('bs58');
+import bs58 from 'bs58';
+
+// Dynamic import to handle module compatibility
+let DLMM: any;
+async function initDLMM() {
+    if (!DLMM) {
+        const module = await import('@meteora-ag/dlmm');
+        DLMM = (module as any).default || module;
+    }
+    return DLMM;
+}
 
 // ============================================
 // TYPES
@@ -93,7 +101,7 @@ function loadWallet(privateKeyString: string): Keypair {
 // ============================================
 
 async function getUserPositions(
-    dlmm: DLMM,
+    dlmm: any,
     userPublicKey: PublicKey
 ): Promise<any[]> {
     try {
@@ -113,11 +121,11 @@ async function getUserPositions(
 }
 
 async function removeAllLiquidityFromPosition(
-    dlmm: DLMM,
+    dlmm: any,
     position: any,
     userPublicKey: PublicKey
 ): Promise<Transaction | Transaction[]> {
-        try {
+    try {
         console.log(`🔨 Building remove liquidity transaction...`);
         console.log(`   Position: ${position.publicKey.toString()}`);
         console.log(`   [DEBUG] Full position data:`, JSON.stringify(position, null, 2));
@@ -165,7 +173,7 @@ async function executeTransactions(
         for (let i = 0; i < txArray.length; i++) {
             const tx = txArray[i];
 
-                        console.log(`   Transaction ${i + 1}/${txArray.length}...`);
+            console.log(`   Transaction ${i + 1}/${txArray.length}...`);
             console.log(`   Broadcasting to the network...`);
             
             // Add recent blockhash and sign
@@ -191,7 +199,7 @@ async function executeTransactions(
         console.log(`✅ All transactions confirmed!`);
         return signatures;
 
-        } catch (error) {
+    } catch (error) {
         console.error(`   ❌ Transaction failed: ${(error as Error).message}`);
         // Log the full error for more details, including potential signature
         console.error(error); 
@@ -270,8 +278,9 @@ async function executePositionClose(
 
         // Initialize Meteora DLMM
         console.log('🌪️  Initializing Meteora DLMM...');
+        const DLMMClass = await initDLMM();
         const dlmm = await executeWithRetry(
-            () => DLMM.create(connection, new PublicKey(config.poolAddress)),
+            () => DLMMClass.create(connection, new PublicKey(config.poolAddress)),
             config.maxRetries,
             config.retryDelayMs,
             'Initialize DLMM'
@@ -357,10 +366,6 @@ async function executePositionClose(
 // ERROR HANDLING
 // ============================================
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
 function handleExecutionError(
     error: Error,
     tokenSymbol: string,
@@ -381,7 +386,7 @@ function handleExecutionError(
 // EXPORTS
 // ============================================
 
-module.exports = {
+export {
   executePositionClose,
   handleExecutionError
 };
