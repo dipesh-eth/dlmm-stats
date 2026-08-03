@@ -7,11 +7,14 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies, including TypeScript for the build step
+RUN npm ci
 
 # Copy application files
 COPY . .
+
+# Build JS/TS into dist, then remove dev-only dependencies
+RUN npm run build && npm prune --omit=dev
 
 # Create a non-root user and group (if they don't exist)
 RUN groupadd -g 1001 nodejs || true && \
@@ -36,5 +39,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD node -e "console.log('Health check passed')" || exit 1
 
 # Start the bot
-CMD ["node", "bot.js"]
-
+CMD ["node", "dist/bot.js"]

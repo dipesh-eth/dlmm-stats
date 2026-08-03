@@ -4,7 +4,7 @@ services:
   meteora-bot:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: dockerfile
     container_name: meteora-discord-bot
     restart: unless-stopped
     environment:
@@ -15,12 +15,16 @@ services:
       - METEORA_API_BASE=${METEORA_API_BASE:-https://dlmm.datapi.meteora.ag}
       # Helius RPC
       - HELIUS_API_KEY=${HELIUS_API_KEY}
+      # Execution / wallet encryption
+      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY}
+      - RPC_ENDPOINT=${RPC_ENDPOINT}
       # Node Environment
       - NODE_ENV=production
     # Optional: Mount logs directory
     volumes:
       - ./logs:/app/logs
       - ./wallets.json:/app/wallets.json
+      - ./bot-database.db:/app/bot-database.db
     # Resource limits (adjust as needed)
     deploy:
       resources:
