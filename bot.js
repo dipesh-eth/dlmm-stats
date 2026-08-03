@@ -1,5 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder, ComponentType } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
+import DLMM from '@meteora-ag/dlmm';
+import { Connection, PublicKey } from '@solana/web3.js';
 import MeteoraClient from './logic.js';
 import { getPositionIdFromTx } from './helius.js';
 import { initializeDatabase, setupWallet, addMonitor, getUserMonitors, removeMonitor, getAllActiveMonitors, getEncryptedKey, updateMonitorStatus } from './src/database.js';
@@ -119,6 +121,170 @@ const client = new Client({
 });
 
 const meteora = new MeteoraClient();
+const rpcConnection = new Connection(process.env.RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com', 'confirmed');
+const dlmmPoolCache = new Map();
+const DLMMClass = DLMM?.default || DLMM;
+
+async function getDlmmPool(poolAddress) {
+  if (!dlmmPoolCache.has(poolAddress)) {
+    dlmmPoolCache.set(poolAddress, DLMMClass.create(rpcConnection, new PublicKey(poolAddress)));
+  }
+  return dlmmPoolCache.get(poolAddress);
+}
+
+function decimalAmount(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function drawDashedLine(ctx, x, y1, y2) {
+  ctx.save();
+  ctx.setLineDash([5, 5]);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y1);
+  ctx.lineTo(x, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function fillRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.fill();
+}
+
+async function createLiquidityChart(positionData) {
+  if (!positionData.poolAddress || !positionData.owner || !positionData.position) return null;
+
+  const lowerBinId = Number(positionData.range?.[0]);
+  const upperBinId = Number(positionData.range?.[1]);
+  const activeBinId = Number(positionData.range?.[2]);
+  if (![lowerBinId, upperBinId, activeBinId].every(Number.isFinite)) return null;
+
+  const rangeSize = Math.max(1, upperBinId - lowerBinId);
+  const paddingBins = Math.max(8, Math.ceil(rangeSize * 0.25));
+  const chartLowerBin = lowerBinId - paddingBins;
+  const chartUpperBin = upperBinId + paddingBins;
+
+  const dlmmPool = await getDlmmPool(positionData.poolAddress);
+  const [{ activeBin, bins }, { userPositions }] = await Promise.all([
+    dlmmPool.getBinsBetweenLowerAndUpperBound(chartLowerBin, chartUpperBin),
+    dlmmPool.getPositionsByUserAndLbPair(new PublicKey(positionData.owner)),
+  ]);
+
+  const activeId = Number(activeBin?.binId ?? activeBin ?? activeBinId);
+  const userPosition = userPositions.find(pos => pos.publicKey?.toBase58?.() === positionData.position);
+  const userBins = new Map((userPosition?.positionData?.positionBinData || []).map(bin => [bin.binId, bin]));
+  const poolPrice = Number(positionData.raw?.poolActivePrice || positionData.priceRange?.[0] || 0);
+  const apiTokenXPrice = Number(positionData.price0 || 0);
+  const apiTokenYPrice = Number(positionData.price1 || 0);
+  const tokenXPrice = apiTokenXPrice || (apiTokenYPrice && poolPrice ? apiTokenYPrice * poolPrice : 0);
+  const tokenYPrice = apiTokenYPrice || (apiTokenXPrice && poolPrice ? apiTokenXPrice / poolPrice : 0);
+  const normalizedBins = bins.map(bin => {
+    const userBin = userBins.get(bin.binId);
+    const positionAmountX = decimalAmount(userBin?.positionXAmount);
+    const positionAmountY = decimalAmount(userBin?.positionYAmount);
+    const tokenXValue = positionAmountX * tokenXPrice;
+    const tokenYValue = positionAmountY * tokenYPrice;
+    return {
+      binId: bin.binId,
+      price: Number(bin.pricePerToken || bin.price || 0),
+      tokenXLiquidity: tokenXValue,
+      tokenYLiquidity: tokenYValue,
+    };
+  });
+
+  const width = 720;
+  const height = 320;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const padX = 34;
+  const chartY = 86;
+  const chartH = 140;
+  const chartW = width - padX * 2;
+  const barW = Math.max(1, chartW / Math.max(1, normalizedBins.length));
+  const leftBins = normalizedBins.filter(bin => bin.binId < activeId);
+  const rightBins = normalizedBins.filter(bin => bin.binId >= activeId);
+  const maxLeft = Math.max(...leftBins.map(bin => bin.tokenYLiquidity), 1);
+  const maxRight = Math.max(...rightBins.map(bin => bin.tokenXLiquidity), 1);
+  const binToX = binId => padX + ((binId - chartLowerBin) / Math.max(1, chartUpperBin - chartLowerBin)) * chartW;
+  const activeX = binToX(activeId);
+  const minPrice = Number(positionData.priceRange?.[0] || 0);
+  const maxPrice = Number(positionData.priceRange?.[1] || 0);
+  const currentPrice = normalizedBins.find(bin => bin.binId === activeId)?.price || poolPrice;
+
+  ctx.fillStyle = '#1f1d2b';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#e5e7eb';
+  ctx.font = 'bold 16px Arial';
+  ctx.fillText(`${positionData.tokenName0}`, 34, 28);
+  ctx.fillText(`${positionData.tokenName1}`, 122, 28);
+  ctx.textAlign = 'right';
+  ctx.fillText(`${positionData.tokenName0}/${positionData.tokenName1}`, width - 34, 28);
+  ctx.textAlign = 'left';
+
+  ctx.fillStyle = '#6d4ce6';
+  ctx.beginPath();
+  ctx.arc(24, 23, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#17b8d4';
+  ctx.beginPath();
+  ctx.arc(112, 23, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  normalizedBins.forEach((bin, index) => {
+    const x = padX + index * barW;
+    const isLeftSide = bin.binId < activeId;
+    const liquidity = isLeftSide
+      ? bin.tokenYLiquidity
+      : bin.tokenXLiquidity;
+    if (!liquidity) return;
+    const sideMax = isLeftSide ? maxLeft : maxRight;
+    const barH = Math.max(2, (liquidity / sideMax) * chartH);
+    ctx.fillStyle = isLeftSide ? '#10cbe3' : '#7648f0';
+    ctx.fillRect(x, chartY + chartH - barH, Math.max(1, barW - 1), barH);
+  });
+
+  drawDashedLine(ctx, activeX, 52, chartY + chartH + 12);
+
+  ctx.fillStyle = '#2b293a';
+  fillRoundedRect(ctx, activeX - 58, 42, 116, 42, 6);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Pool Price', activeX, 58);
+  ctx.font = 'bold 12px Arial';
+  ctx.fillText(`${currentPrice.toFixed(6)} ${positionData.tokenName0}/${positionData.tokenName1}`, activeX, 74);
+
+  ctx.fillStyle = '#8f8aa7';
+  ctx.font = '14px Arial';
+  ctx.fillText(minPrice.toFixed(6), padX + 18, 250);
+  ctx.fillText(currentPrice.toFixed(6), activeX, 250);
+  ctx.fillText(maxPrice.toFixed(6), width - padX - 28, 250);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#f4d8a8';
+  ctx.font = '15px Arial';
+  ctx.fillText(`Min Price  ${minPrice.toFixed(6)}`, padX, 304);
+  ctx.textAlign = 'right';
+  ctx.fillText(`Max Price  ${maxPrice.toFixed(6)}`, width - padX, 304);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`Total Bins: ${Math.max(0, upperBinId - lowerBinId + 1)}`, width / 2, 304);
+
+  return canvas.toBuffer();
+}
 
 function isUnknownInteractionError(error) {
   return error?.code === 10062 || error?.rawError?.code === 10062;
@@ -684,6 +850,7 @@ async function handleOpenPositions(interaction) {
 
   const positions = data.data;
   const embeds = [];
+  const files = [];
   const totals = positions.reduce((acc, pos) => {
     acc.investedUsd += Number(pos.inputValue || 0);
     acc.investedSol += Number(pos.inputNative || 0);
@@ -788,16 +955,34 @@ async function handleOpenPositions(interaction) {
       )
       .setTimestamp();
 
+    try {
+      const chartBuffer = await createLiquidityChart(pos);
+      if (chartBuffer) {
+        const fileName = `position-${i + 1}-bins.png`;
+        posEmbed.setImage(`attachment://${fileName}`);
+        files.push({
+          embedIndex: embeds.length,
+          file: new AttachmentBuilder(chartBuffer, { name: fileName }),
+        });
+      }
+    } catch (error) {
+      console.warn(`[Positions] Could not render liquidity chart for ${pos.position}:`, error.message);
+    }
+
     embeds.push(posEmbed);
   }
 
   // Send embeds in chunks of 10
   for (let i = 0; i < embeds.length; i += 10) {
     const chunk = embeds.slice(i, i + 10);
+    const chunkFiles = files
+      .filter(item => item.embedIndex >= i && item.embedIndex < i + 10)
+      .map(item => item.file);
+    const payload = chunkFiles.length ? { embeds: chunk, files: chunkFiles } : { embeds: chunk };
     if (i === 0) {
-      await interaction.editReply({ embeds: chunk });
+      await interaction.editReply(payload);
     } else {
-      await interaction.followUp({ embeds: chunk });
+      await interaction.followUp(payload);
     }
   }
 }
