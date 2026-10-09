@@ -18,6 +18,9 @@ services:
       # Execution / wallet encryption
       - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY}
       - RPC_ENDPOINT=${RPC_ENDPOINT}
+      # Optional read-only phone/widget API. It remains disabled without API_TOKEN.
+      - API_TOKEN=${API_TOKEN}
+      - API_PORT=3000
       # Node Environment
       - NODE_ENV=production
     # Optional: Mount logs directory
@@ -25,6 +28,8 @@ services:
       - ./logs:/app/logs
       - ./wallets.json:/app/wallets.json
       - ./bot-database.db:/app/bot-database.db
+    ports:
+      - "${API_PORT:-3000}:3000"
     # Resource limits (adjust as needed)
     deploy:
       resources:

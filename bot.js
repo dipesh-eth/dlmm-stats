@@ -1,8 +1,8 @@
 import { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Routes, AttachmentBuilder, ActionRowBuilder, StringSelectMenuBuilder, ComponentType } from 'discord.js';
 import { createCanvas, loadImage } from 'canvas';
-import DLMM from '@meteora-ag/dlmm';
-import { Connection, PublicKey } from '@solana/web3.js';
 import MeteoraClient from './logic.js';
+import { getPositionLiquidityProfile } from './src/position-liquidity.js';
+import { startApiServer } from './src/api-server.js';
 import { getPositionIdFromTx } from './helius.js';
 import { initializeDatabase, setupWallet, addMonitor, getUserMonitors, removeMonitor, getAllActiveMonitors, getEncryptedKey, updateMonitorStatus } from './src/database.js';
 import { encrypt } from './src/encryption.js';
@@ -121,28 +121,6 @@ const client = new Client({
 });
 
 const meteora = new MeteoraClient();
-const rpcConnection = new Connection(process.env.RPC_ENDPOINT || 'https://api.mainnet-beta.solana.com', 'confirmed');
-const dlmmPoolCache = new Map();
-const DLMMClass = DLMM?.default || DLMM;
-
-async function getDlmmPool(poolAddress) {
-  if (!dlmmPoolCache.has(poolAddress)) {
-    dlmmPoolCache.set(poolAddress, DLMMClass.create(rpcConnection, new PublicKey(poolAddress)));
-  }
-  return dlmmPoolCache.get(poolAddress);
-}
-
-function parseBigIntAmount(value) {
-  const raw = value?.toString?.() ?? String(value || '0');
-  const integerPart = raw.split('.')[0].replace(/\D/g, '').replace(/^0+/, '');
-  return integerPart ? BigInt(integerPart) : 0n;
-}
-
-function bigintRatio(value, max) {
-  if (!value || !max) return 0;
-  const scaled = (value * 1_000_000n) / max;
-  return Number(scaled) / 1_000_000;
-}
 
 function drawDashedLine(ctx, x, y1, y2) {
   ctx.save();
@@ -172,35 +150,9 @@ function fillRoundedRect(ctx, x, y, width, height, radius) {
 }
 
 async function createLiquidityChart(positionData) {
-  if (!positionData.poolAddress || !positionData.owner || !positionData.position) return null;
-
-  const lowerBinId = Number(positionData.range?.[0]);
-  const upperBinId = Number(positionData.range?.[1]);
-  const activeBinId = Number(positionData.range?.[2]);
-  if (![lowerBinId, upperBinId, activeBinId].every(Number.isFinite)) return null;
-
-  const rangeSize = Math.max(1, upperBinId - lowerBinId);
-  const paddingBins = Math.max(8, Math.ceil(rangeSize * 0.25));
-  const chartLowerBin = lowerBinId - paddingBins;
-  const chartUpperBin = upperBinId + paddingBins;
-
-  const dlmmPool = await getDlmmPool(positionData.poolAddress);
-  const [{ activeBin, bins }, { userPositions }] = await Promise.all([
-    dlmmPool.getBinsBetweenLowerAndUpperBound(chartLowerBin, chartUpperBin),
-    dlmmPool.getPositionsByUserAndLbPair(new PublicKey(positionData.owner)),
-  ]);
-
-  const activeId = Number(activeBin?.binId ?? activeBin ?? activeBinId);
-  const userPosition = userPositions.find(pos => pos.publicKey?.toBase58?.() === positionData.position);
-  const userBins = new Map((userPosition?.positionData?.positionBinData || []).map(bin => [bin.binId, bin]));
-  const normalizedBins = bins.map(bin => {
-    const userBin = userBins.get(bin.binId);
-    return {
-      binId: bin.binId,
-      price: Number(bin.pricePerToken || bin.price || 0),
-      positionLiquidity: parseBigIntAmount(userBin?.positionLiquidity),
-    };
-  });
+  const liquidity = await getPositionLiquidityProfile(positionData);
+  if (!liquidity) return null;
+  const { lowerBinId, upperBinId, activeBinId: activeId, bins: normalizedBins } = liquidity;
 
   const width = 720;
   const height = 320;
@@ -211,15 +163,13 @@ async function createLiquidityChart(positionData) {
   const chartH = 140;
   const chartW = width - padX * 2;
   const barW = Math.max(1, chartW / Math.max(1, normalizedBins.length));
-  const maxLiquidity = normalizedBins.reduce(
-    (max, bin) => bin.positionLiquidity > max ? bin.positionLiquidity : max,
-    0n,
-  );
+  const chartLowerBin = normalizedBins[0]?.binId ?? lowerBinId;
+  const chartUpperBin = normalizedBins.at(-1)?.binId ?? upperBinId;
   const binToX = binId => padX + ((binId - chartLowerBin) / Math.max(1, chartUpperBin - chartLowerBin)) * chartW;
   const activeX = binToX(activeId);
-  const minPrice = Number(positionData.priceRange?.[0] || 0);
-  const maxPrice = Number(positionData.priceRange?.[1] || 0);
-  const currentPrice = normalizedBins.find(bin => bin.binId === activeId)?.price || Number(positionData.raw?.poolActivePrice || 0);
+  const minPrice = liquidity.minPrice;
+  const maxPrice = liquidity.maxPrice;
+  const currentPrice = liquidity.currentPrice;
 
   ctx.fillStyle = '#1f1d2b';
   ctx.fillRect(0, 0, width, height);
@@ -242,9 +192,9 @@ async function createLiquidityChart(positionData) {
 
   normalizedBins.forEach((bin, index) => {
     const x = padX + index * barW;
-    const isLeftSide = bin.binId < activeId;
-    if (!bin.positionLiquidity) return;
-    const barH = Math.max(2, bigintRatio(bin.positionLiquidity, maxLiquidity) * chartH);
+    const isLeftSide = bin.side === 'left';
+    if (!bin.liquidity) return;
+    const barH = Math.max(2, bin.liquidity * chartH);
     ctx.fillStyle = isLeftSide ? '#10cbe3' : '#7648f0';
     ctx.fillRect(x, chartY + chartH - barH, Math.max(1, barW - 1), barH);
   });
@@ -535,6 +485,7 @@ client.once('ready', async () => {
     // Initialize wallet storage and register commands
     initWalletStorage();
     await registerCommands();
+    startApiServer(meteora);
     
     // Start the main monitoring loop
     startMonitoringLoop(client);
