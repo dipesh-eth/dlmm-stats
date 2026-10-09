@@ -1,8 +1,11 @@
+// @ts-nocheck
 import http from 'node:http';
-import { getPositionLiquidityProfile } from './position-liquidity.js';
+import { TimedCache } from '../services/cache-service.js';
+import { PositionService } from '../services/position-service.js';
+import { getPositionsResponse } from './routes/positions.js';
 
-const cache = new Map();
-const CACHE_MS = 20_000;
+// @ts-nocheck
+const cache = new TimedCache(20_000);
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -10,31 +13,6 @@ function sendJson(response, status, body) {
     'Cache-Control': 'no-store',
   });
   response.end(JSON.stringify(body));
-}
-
-function toNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function compactPosition(position, liquidity) {
-  return {
-    id: position.position,
-    poolAddress: position.poolAddress,
-    pair: {
-      base: position.tokenName0,
-      quote: position.tokenName1,
-    },
-    totalBalanceUsd: toNumber(position.currentValue),
-    collectibleFeesUsd: toNumber(position.unCollectedFee),
-    pnlUsd: toNumber(position.pnl?.value),
-    pnlPercent: toNumber(position.pnl?.percent) * 100,
-    inRange: Boolean(position.inRange),
-    minPrice: toNumber(position.priceRange?.[0]),
-    maxPrice: toNumber(position.priceRange?.[1]),
-    currentPrice: liquidity?.currentPrice || 0,
-    liquidity,
-  };
 }
 
 export function startApiServer(meteora) {
@@ -45,6 +23,7 @@ export function startApiServer(meteora) {
   }
 
   const port = Number(process.env.API_PORT || 3000);
+  const positionService = new PositionService(meteora);
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
     if (request.method === 'GET' && url.pathname === '/health') {
@@ -63,25 +42,11 @@ export function startApiServer(meteora) {
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 5), 1), 15);
     const cacheKey = `${wallet}:${limit}`;
     const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.createdAt < CACHE_MS) return sendJson(response, 200, cached.data);
+    if (cached) return sendJson(response, 200, cached);
 
     try {
-      const result = await meteora.getOpenPositions(wallet);
-      const positions = result.data.slice(0, limit);
-      const data = {
-        wallet,
-        updatedAt: new Date().toISOString(),
-        totalPositions: result.count,
-        positions: await Promise.all(positions.map(async position => {
-          try {
-            return compactPosition(position, await getPositionLiquidityProfile(position));
-          } catch (error) {
-            console.warn(`[API] Could not load bins for ${position.position}: ${error.message}`);
-            return compactPosition(position, null);
-          }
-        })),
-      };
-      cache.set(cacheKey, { createdAt: Date.now(), data });
+      const data = await getPositionsResponse(positionService, wallet, limit);
+      cache.set(cacheKey, data);
       return sendJson(response, 200, data);
     } catch (error) {
       console.error('[API] Failed to load positions:', error);

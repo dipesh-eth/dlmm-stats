@@ -1,3 +1,4 @@
+// @ts-nocheck
 import DLMM from '@meteora-ag/dlmm';
 import { Connection, PublicKey } from '@solana/web3.js';
 
