@@ -2,3 +2,4 @@
 .env
 dist/
 bot-database.db
+pnl_bot.tar.gz
