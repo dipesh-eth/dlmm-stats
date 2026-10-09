@@ -132,9 +132,16 @@ async function getDlmmPool(poolAddress) {
   return dlmmPoolCache.get(poolAddress);
 }
 
-function decimalAmount(value) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
+function parseBigIntAmount(value) {
+  const raw = value?.toString?.() ?? String(value || '0');
+  const integerPart = raw.split('.')[0].replace(/\D/g, '').replace(/^0+/, '');
+  return integerPart ? BigInt(integerPart) : 0n;
+}
+
+function bigintRatio(value, max) {
+  if (!value || !max) return 0;
+  const scaled = (value * 1_000_000n) / max;
+  return Number(scaled) / 1_000_000;
 }
 
 function drawDashedLine(ctx, x, y1, y2) {
@@ -186,22 +193,12 @@ async function createLiquidityChart(positionData) {
   const activeId = Number(activeBin?.binId ?? activeBin ?? activeBinId);
   const userPosition = userPositions.find(pos => pos.publicKey?.toBase58?.() === positionData.position);
   const userBins = new Map((userPosition?.positionData?.positionBinData || []).map(bin => [bin.binId, bin]));
-  const poolPrice = Number(positionData.raw?.poolActivePrice || positionData.priceRange?.[0] || 0);
-  const apiTokenXPrice = Number(positionData.price0 || 0);
-  const apiTokenYPrice = Number(positionData.price1 || 0);
-  const tokenXPrice = apiTokenXPrice || (apiTokenYPrice && poolPrice ? apiTokenYPrice * poolPrice : 0);
-  const tokenYPrice = apiTokenYPrice || (apiTokenXPrice && poolPrice ? apiTokenXPrice / poolPrice : 0);
   const normalizedBins = bins.map(bin => {
     const userBin = userBins.get(bin.binId);
-    const positionAmountX = decimalAmount(userBin?.positionXAmount);
-    const positionAmountY = decimalAmount(userBin?.positionYAmount);
-    const tokenXValue = positionAmountX * tokenXPrice;
-    const tokenYValue = positionAmountY * tokenYPrice;
     return {
       binId: bin.binId,
       price: Number(bin.pricePerToken || bin.price || 0),
-      tokenXLiquidity: tokenXValue,
-      tokenYLiquidity: tokenYValue,
+      positionLiquidity: parseBigIntAmount(userBin?.positionLiquidity),
     };
   });
 
@@ -214,15 +211,15 @@ async function createLiquidityChart(positionData) {
   const chartH = 140;
   const chartW = width - padX * 2;
   const barW = Math.max(1, chartW / Math.max(1, normalizedBins.length));
-  const leftBins = normalizedBins.filter(bin => bin.binId < activeId);
-  const rightBins = normalizedBins.filter(bin => bin.binId >= activeId);
-  const maxLeft = Math.max(...leftBins.map(bin => bin.tokenYLiquidity), 1);
-  const maxRight = Math.max(...rightBins.map(bin => bin.tokenXLiquidity), 1);
+  const maxLiquidity = normalizedBins.reduce(
+    (max, bin) => bin.positionLiquidity > max ? bin.positionLiquidity : max,
+    0n,
+  );
   const binToX = binId => padX + ((binId - chartLowerBin) / Math.max(1, chartUpperBin - chartLowerBin)) * chartW;
   const activeX = binToX(activeId);
   const minPrice = Number(positionData.priceRange?.[0] || 0);
   const maxPrice = Number(positionData.priceRange?.[1] || 0);
-  const currentPrice = normalizedBins.find(bin => bin.binId === activeId)?.price || poolPrice;
+  const currentPrice = normalizedBins.find(bin => bin.binId === activeId)?.price || Number(positionData.raw?.poolActivePrice || 0);
 
   ctx.fillStyle = '#1f1d2b';
   ctx.fillRect(0, 0, width, height);
@@ -246,12 +243,8 @@ async function createLiquidityChart(positionData) {
   normalizedBins.forEach((bin, index) => {
     const x = padX + index * barW;
     const isLeftSide = bin.binId < activeId;
-    const liquidity = isLeftSide
-      ? bin.tokenYLiquidity
-      : bin.tokenXLiquidity;
-    if (!liquidity) return;
-    const sideMax = isLeftSide ? maxLeft : maxRight;
-    const barH = Math.max(2, (liquidity / sideMax) * chartH);
+    if (!bin.positionLiquidity) return;
+    const barH = Math.max(2, bigintRatio(bin.positionLiquidity, maxLiquidity) * chartH);
     ctx.fillStyle = isLeftSide ? '#10cbe3' : '#7648f0';
     ctx.fillRect(x, chartY + chartH - barH, Math.max(1, barW - 1), barH);
   });
