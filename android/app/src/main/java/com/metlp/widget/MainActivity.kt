@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,7 +53,13 @@ private val Negative = Color(0xFFFF7777)
 
 data class SavedWallet(val id: String, val name: String, val address: String, val token: String)
 data class LiquidityBin(val binId: Int, val liquidity: Float, val side: String)
-data class PositionCard(val id: String, val pair: String, val balanceSol: Double, val feesSol: Double, val pnlSol: Double, val pnlPercent: Double, val feeTvl24hPercent: Double?, val inRange: Boolean, val bins: List<LiquidityBin>, val activeBinId: Int?)
+data class TokenAmount(val symbol: String, val amount: Double, val amountSol: Double)
+data class PositionCard(
+    val id: String, val pair: String, val balanceSol: Double, val investedSol: Double, val feesSol: Double,
+    val pnlSol: Double, val pnlPercent: Double, val feeTvl24hPercent: Double?, val inRange: Boolean,
+    val poolPrice: Double, val minPrice: Double, val maxPrice: Double, val binStep: Int, val poolFeePercent: Double,
+    val liquidityTokens: List<TokenAmount>, val feeTokens: List<TokenAmount>, val bins: List<LiquidityBin>, val activeBinId: Int?,
+)
 data class WalletSummary(val investedSol: Double, val feesSol: Double, val pnlSol: Double, val positions: Int)
 data class WalletPayload(val summary: WalletSummary, val positions: List<PositionCard>)
 
@@ -128,7 +137,10 @@ private fun WalletPositions(wallet: SavedWallet, payload: WalletPayload?, second
         when {
             payload == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Cyan) }
             payload.positions.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No open positions.", color = Muted) }
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) { items(payload.positions, key = { it.id }) { PositionRow(it) } }
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+                item { WalletSummaryCard(payload.summary) }
+                items(payload.positions, key = { it.id }) { PositionRow(it) }
+            }
         }
     }
 }
@@ -182,35 +194,107 @@ private fun SummaryMetric(label: String, value: String, modifier: Modifier, valu
 }
 
 @Composable
-private fun PositionRow(position: PositionCard) {
-    Surface(color = Surface, shape = MaterialTheme.shapes.small) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 142.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(position.pair, color = Color.White, fontWeight = FontWeight.Bold)
-                Text("BALANCE  ${sol(position.balanceSol)}", color = Color(0xFFC9C4D8), fontSize = 12.sp)
-                Text("FEES  ${sol(position.feesSol)}", color = Color(0xFFC9C4D8), fontSize = 12.sp)
-                Text("PNL  ${signedSol(position.pnlSol)} (${signedPercent(position.pnlPercent)})", color = if (position.pnlSol >= 0) Positive else Negative, fontSize = 12.sp)
-                Text("24H FEE / TVL  ${position.feeTvl24hPercent?.let { signedPercent(it) } ?: "COLLECTING"}", color = Color(0xFFF4D8A8), fontSize = 11.sp)
-                Text(if (position.inRange) "IN RANGE" else "OUT OF RANGE", color = if (position.inRange) Cyan else Color(0xFFFFC46B), fontSize = 10.sp)
+private fun WalletSummaryCard(summary: WalletSummary) {
+    Surface(color = Color(0xFF2A263A), shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("WALLET SUMMARY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                SummaryMetric("TOTAL INVESTED", sol(summary.investedSol), Modifier.weight(1f))
+                SummaryMetric("CURRENT FEES", sol(summary.feesSol), Modifier.weight(1f))
             }
-            LiquidityShape(position, Modifier.width(142.dp).height(106.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp)) {
+                SummaryMetric("CURRENT PNL", signedSol(summary.pnlSol), Modifier.weight(1f), if (summary.pnlSol >= 0) Positive else Negative)
+                SummaryMetric("OPEN POSITIONS", summary.positions.toString(), Modifier.weight(1f))
+            }
         }
     }
 }
 
 @Composable
-private fun LiquidityShape(position: PositionCard, modifier: Modifier) {
+private fun PositionRow(position: PositionCard) {
+    var expanded by rememberSaveable(position.id) { mutableStateOf(false) }
+    Surface(color = Surface, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().animateContentSize().clickable { expanded = !expanded }) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(position.pair, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                    Text("Bin step ${position.binStep}  ·  Fee ${percent(position.poolFeePercent)}", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+                }
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Collapse" else "Expand", tint = Muted)
+            }
+            PositionMetric("YOUR LIQUIDITY", sol(position.balanceSol), Color.White)
+            PositionMetric("PNL", "${signedSol(position.pnlSol)}  (${signedPercent(position.pnlPercent)})", if (position.pnlSol >= 0) Positive else Negative)
+            PositionMetric("CLAIMABLE FEES", sol(position.feesSol), Color.White)
+            PositionMetric("24H FEE / TVL", position.feeTvl24hPercent?.let { percent(it) } ?: "UNAVAILABLE", Color(0xFFF4D8A8))
+            PositionMetric("POOL PRICE", "${price(position.poolPrice)} ${position.pair}", Color(0xFFC9C4D8))
+            Text(if (position.inRange) "IN RANGE" else "OUT OF RANGE", color = if (position.inRange) Cyan else Color(0xFFFFC46B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 13.dp))
+            if (expanded) ExpandedPosition(position)
+        }
+    }
+}
+
+@Composable
+private fun PositionMetric(label: String, value: String, color: Color) {
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Muted, fontSize = 11.sp)
+        Text(value, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun ExpandedPosition(position: PositionCard) {
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        HorizontalDivider(color = Color(0xFF3A354A))
+        Text("POSITION RANGE", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+        LiquidityChart(position, Modifier.fillMaxWidth().height(128.dp).padding(top = 12.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            ChartLabel("MIN", price(position.minPrice), Alignment.Start)
+            ChartLabel("POOL PRICE", price(position.poolPrice), Alignment.CenterHorizontally)
+            ChartLabel("MAX", price(position.maxPrice), Alignment.End)
+        }
+        Text("LIQUIDITY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 20.dp, bottom = 7.dp))
+        position.liquidityTokens.forEach { TokenLine(it) }
+        Text("UNCLAIMED FEES", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, bottom = 7.dp))
+        position.feeTokens.forEach { TokenLine(it) }
+    }
+}
+
+@Composable
+private fun ChartLabel(label: String, value: String, alignment: Alignment.Horizontal) {
+    Column(Modifier.width(98.dp), horizontalAlignment = alignment) {
+        Text(label, color = Muted, fontSize = 9.sp)
+        Text(value, color = Color(0xFFC9C4D8), fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun TokenLine(token: TokenAmount) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(token.symbol, color = Color(0xFFC9C4D8), fontSize = 12.sp)
+        Text("${amount(token.amount)}  (${sol(token.amountSol)})", color = Color.White, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun LiquidityChart(position: PositionCard, modifier: Modifier) {
     Canvas(modifier) {
         if (position.bins.isEmpty()) return@Canvas
-        val step = size.width / position.bins.size
+        // The API includes empty edge bins. Excluding them lets the actual
+        // position shape use the whole chart instead of sitting in the middle.
+        val firstFilled = position.bins.indexOfFirst { it.liquidity > 0f }
+        val lastFilled = position.bins.indexOfLast { it.liquidity > 0f }
+        if (firstFilled < 0 || lastFilled < firstFilled) return@Canvas
+
+        val visibleBins = position.bins.subList(firstFilled, lastFilled + 1)
+        val step = size.width / visibleBins.size
         val activeIndex = position.bins.indexOfFirst { it.binId == position.activeBinId }
-        position.bins.forEachIndexed { index, bin ->
+        visibleBins.forEachIndexed { index, bin ->
             if (bin.liquidity <= 0f) return@forEachIndexed
-            val height = (size.height - 16.dp.toPx()) * bin.liquidity
+            val height = (size.height - 12.dp.toPx()) * bin.liquidity
             drawLine(if (bin.side == "left") Cyan else Purple, Offset(index * step + step / 2, size.height), Offset(index * step + step / 2, size.height - height), (step * .65f).coerceAtLeast(1f))
         }
-        if (activeIndex >= 0) {
-            val x = activeIndex * step + step / 2
+        if (activeIndex in firstFilled..lastFilled) {
+            val x = (activeIndex - firstFilled) * step + step / 2
             drawLine(Color.White, Offset(x, 0f), Offset(x, size.height), 1.5.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
         }
     }
@@ -252,10 +336,15 @@ private fun fetchWallet(wallet: SavedWallet, limit: Int, success: (WalletPayload
 
 private fun parsePosition(item: JSONObject): PositionCard {
     val liquidity = item.optJSONObject("liquidity"); val bins = liquidity?.optJSONArray("bins")
+    fun tokenList(key: String): List<TokenAmount> {
+        val group = item.optJSONObject(key) ?: return emptyList()
+        return listOf("token0", "token1").mapNotNull { side -> group.optJSONObject(side)?.let { TokenAmount(it.optString("symbol"), it.optDouble("amount"), it.optDouble("amountSol")) } }
+    }
     return PositionCard(
         id = item.optString("id"), pair = "${item.getJSONObject("pair").optString("base")}/${item.getJSONObject("pair").optString("quote")}",
-        balanceSol = item.optDouble("totalBalanceSol"), feesSol = item.optDouble("collectibleFeesSol"), pnlSol = item.optDouble("pnlSol"), pnlPercent = item.optDouble("pnlPercent"),
-        feeTvl24hPercent = if (item.isNull("feeTvl24hPercent")) null else item.optDouble("feeTvl24hPercent"), inRange = item.optBoolean("inRange"), activeBinId = liquidity?.optInt("activeBinId"),
+        balanceSol = item.optDouble("totalBalanceSol"), investedSol = item.optDouble("investedSol"), feesSol = item.optDouble("collectibleFeesSol"), pnlSol = item.optDouble("pnlSol"), pnlPercent = item.optDouble("pnlPercent"),
+        feeTvl24hPercent = if (item.isNull("feeTvl24hPercent")) null else item.optDouble("feeTvl24hPercent"), inRange = item.optBoolean("inRange"), poolPrice = item.optDouble("currentPrice"), minPrice = item.optDouble("minPrice"), maxPrice = item.optDouble("maxPrice"), binStep = item.optInt("binStep"), poolFeePercent = item.optDouble("poolFeePercent"),
+        liquidityTokens = tokenList("liquidityTokens"), feeTokens = tokenList("feeTokens"), activeBinId = liquidity?.optInt("activeBinId"),
         bins = List(bins?.length() ?: 0) { index -> bins!!.getJSONObject(index).let { LiquidityBin(it.optInt("binId"), it.optDouble("liquidity").toFloat(), it.optString("side")) } },
     )
 }
@@ -263,6 +352,9 @@ private fun parsePosition(item: JSONObject): PositionCard {
 private fun sol(value: Double) = String.format(Locale.US, "%.4f SOL", value)
 private fun signedSol(value: Double) = String.format(Locale.US, "%+.4f SOL", value)
 private fun signedPercent(value: Double) = String.format(Locale.US, "%+.2f%%", value)
+private fun percent(value: Double) = String.format(Locale.US, "%.2f%%", value)
+private fun amount(value: Double) = String.format(Locale.US, "%.4f", value)
+private fun price(value: Double) = if (value >= 0.01) String.format(Locale.US, "%.4f", value) else String.format(Locale.US, "%.6f", value)
 
 private object WalletStore {
     private const val PREFS = "metlp_wallets"; private const val KEY = "wallets"

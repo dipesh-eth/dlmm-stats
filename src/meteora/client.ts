@@ -158,7 +158,9 @@ class MeteoraClient {
     const start = (page - 1) * pageSize;
 
     const currentValueUsd = toNumber(unrealized?.balances, tokenPairTotal(position.allTimeWithdrawals, 'usd'));
-    const currentValueNative = tokenPairTotal(unrealized?.balances, 'sol') || (solPrice ? currentValueUsd / solPrice : 0);
+    const currentValueNative = toNumber(unrealized?.balancesSol)
+      || tokenPairTotal(unrealized?.balances, 'sol')
+      || (solPrice ? currentValueUsd / solPrice : 0);
 
     return {
       data: {
@@ -326,7 +328,9 @@ class MeteoraClient {
     const unCollectedFeeSol = sumUnclaimed(unrealized, 'amountSol');
     const outOfRange = position.isOutOfRange ?? pool.outOfRange ?? pool.positionsOutOfRange > 0;
     const currentValueUsd = toNumber(unrealized?.balances, tokenPairTotal(position.allTimeWithdrawals, 'usd'));
-    const currentValueNative = tokenPairTotal(unrealized?.balances, 'sol') || (solPrice ? currentValueUsd / solPrice : 0);
+    const currentValueNative = toNumber(unrealized?.balancesSol)
+      || tokenPairTotal(unrealized?.balances, 'sol')
+      || (solPrice ? currentValueUsd / solPrice : 0);
 
     return {
       protocol: 'meteora',
@@ -344,6 +348,8 @@ class MeteoraClient {
       current: {
         amount0Adjusted: unrealized ? tokenAmount(unrealized, 'balanceTokenX') : tokenAmount(position.allTimeWithdrawals, 'tokenX'),
         amount1Adjusted: unrealized ? tokenAmount(unrealized, 'balanceTokenY') : tokenAmount(position.allTimeWithdrawals, 'tokenY'),
+        amount0Sol: toNumber(unrealized?.balanceTokenX?.amountSol),
+        amount1Sol: toNumber(unrealized?.balanceTokenY?.amountSol),
       },
       pnl: {
         value: pnlUsd,
@@ -355,6 +361,17 @@ class MeteoraClient {
       collectedFeeNative: collectedFeeSol,
       unCollectedFee: unCollectedFeeUsd,
       unCollectedFeeNative: unCollectedFeeSol,
+      fee24hTvlPercent: toNumber(position.feePerTvl24h ?? pool.feePerTvl24h, NaN),
+      unclaimedFees: {
+        token0: {
+          amount: toNumber(unrealized?.unclaimedFeeTokenX?.amount),
+          amountSol: toNumber(unrealized?.unclaimedFeeTokenX?.amountSol),
+        },
+        token1: {
+          amount: toNumber(unrealized?.unclaimedFeeTokenY?.amount),
+          amountSol: toNumber(unrealized?.unclaimedFeeTokenY?.amountSol),
+        },
+      },
       priceRange: [toNumber(position.minPrice), toNumber(position.maxPrice)],
       range: [toNumber(position.lowerBinId), toNumber(position.upperBinId), toNumber(position.poolActiveBinId)],
       poolInfo: {
