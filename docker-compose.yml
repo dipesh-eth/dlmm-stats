@@ -28,8 +28,6 @@ services:
       - ./logs:/app/logs
       - ./wallets.json:/app/wallets.json
       - ./bot-database.db:/app/bot-database.db
-    ports:
-      - "${API_PORT:-3000}:3000"
     # Resource limits (adjust as needed)
     deploy:
       resources:
@@ -49,6 +47,27 @@ services:
     networks:
       - bot-network
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: metlp-https-proxy
+    restart: unless-stopped
+    depends_on:
+      - meteora-bot
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - bot-network
+
 networks:
   bot-network:
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,3 @@
+metlp.duckdns.org {
+    reverse_proxy meteora-bot:3000
+}
