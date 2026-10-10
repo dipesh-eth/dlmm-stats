@@ -55,12 +55,68 @@ export async function initializeDatabase(): Promise<void> {
                 FOREIGN KEY (user_discord_id) REFERENCES users (discord_id)
             );
         `);
+
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS position_fee_snapshots (
+                position_id TEXT NOT NULL,
+                wallet TEXT NOT NULL,
+                recorded_ms INTEGER NOT NULL,
+                fee_native REAL NOT NULL,
+                PRIMARY KEY (position_id, wallet, recorded_ms)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fee_snapshots_lookup
+                ON position_fee_snapshots (position_id, wallet, recorded_ms);
+        `);
         
         console.log('[Database] Connection initialized and tables verified.');
     } catch (error) {
         console.error('[Database] Failed to initialize:', error);
         throw error; // Propagate the error to stop the bot if the DB can't start
     }
+}
+
+/**
+ * Stores a compact fee checkpoint every five minutes. A 24-hour fee/TVL value
+ * becomes available after the service has observed the open position for a day.
+ */
+export async function recordFeeSnapshotAndGet24hRate(
+    positionId: string,
+    wallet: string,
+    earnedFeeNative: number,
+    currentValueNative: number,
+): Promise<number | null> {
+    if (!db || !Number.isFinite(earnedFeeNative) || currentValueNative <= 0) return null;
+
+    const now = Date.now();
+    const cutoff = now - 24 * 60 * 60 * 1000;
+    const latest = await db.get<{ recorded_ms: number }>(
+        `SELECT recorded_ms FROM position_fee_snapshots
+         WHERE position_id = ? AND wallet = ? ORDER BY recorded_ms DESC LIMIT 1`,
+        positionId,
+        wallet,
+    );
+    const baseline = await db.get<{ fee_native: number }>(
+        `SELECT fee_native FROM position_fee_snapshots
+         WHERE position_id = ? AND wallet = ? AND recorded_ms <= ?
+         ORDER BY recorded_ms DESC LIMIT 1`,
+        positionId,
+        wallet,
+        cutoff,
+    );
+
+    if (!latest || now - latest.recorded_ms >= 5 * 60 * 1000) {
+        await db.run(
+            'INSERT INTO position_fee_snapshots (position_id, wallet, recorded_ms, fee_native) VALUES (?, ?, ?, ?)',
+            positionId,
+            wallet,
+            now,
+            earnedFeeNative,
+        );
+    }
+    await db.run('DELETE FROM position_fee_snapshots WHERE recorded_ms < ?', now - 48 * 60 * 60 * 1000);
+
+    if (!baseline) return null;
+    return Math.max(0, ((earnedFeeNative - baseline.fee_native) / currentValueNative) * 100);
 }
 
 /**

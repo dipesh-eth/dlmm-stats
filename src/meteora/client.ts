@@ -157,6 +157,9 @@ class MeteoraClient {
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const start = (page - 1) * pageSize;
 
+    const currentValueUsd = toNumber(unrealized?.balances, tokenPairTotal(position.allTimeWithdrawals, 'usd'));
+    const currentValueNative = tokenPairTotal(unrealized?.balances, 'sol') || (solPrice ? currentValueUsd / solPrice : 0);
+
     return {
       data: {
         data: positions.slice(start, start + pageSize),
@@ -322,6 +325,8 @@ class MeteoraClient {
     const unCollectedFeeUsd = sumUnclaimed(unrealized, 'usd');
     const unCollectedFeeSol = sumUnclaimed(unrealized, 'amountSol');
     const outOfRange = position.isOutOfRange ?? pool.outOfRange ?? pool.positionsOutOfRange > 0;
+    const currentValueUsd = toNumber(unrealized?.balances, tokenPairTotal(position.allTimeWithdrawals, 'usd'));
+    const currentValueNative = tokenPairTotal(unrealized?.balances, 'sol') || (solPrice ? currentValueUsd / solPrice : 0);
 
     return {
       protocol: 'meteora',
@@ -332,7 +337,8 @@ class MeteoraClient {
       tokenName1: pool.tokenY || pool.token_y?.symbol || 'Token Y',
       price0,
       price1,
-      currentValue: toNumber(unrealized?.balances, tokenPairTotal(position.allTimeWithdrawals, 'usd')),
+      currentValue: currentValueUsd,
+      currentValueNative,
       inputValue: tokenPairTotal(position.allTimeDeposits, 'usd'),
       inputNative: tokenPairTotal(position.allTimeDeposits, 'sol'),
       current: {

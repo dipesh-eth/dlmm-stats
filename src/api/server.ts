@@ -5,7 +5,8 @@ import { PositionService } from '../services/position-service.js';
 import { getPositionsResponse } from './routes/positions.js';
 
 // @ts-nocheck
-const cache = new TimedCache(20_000);
+// Keep normal app refreshes fresh while absorbing duplicate/manual requests.
+const cache = new TimedCache(12_000);
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -39,7 +40,7 @@ export function startApiServer(meteora) {
 
     const wallet = url.searchParams.get('wallet');
     if (!wallet) return sendJson(response, 400, { error: 'wallet is required' });
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 5), 1), 15);
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 5), 1), 30);
     const cacheKey = `${wallet}:${limit}`;
     const cached = cache.get(cacheKey);
     if (cached) return sendJson(response, 200, cached);
