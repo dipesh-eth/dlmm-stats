@@ -45,7 +45,11 @@ export async function getPositionLiquidityProfile(position) {
     dlmmPool.getPositionsByUserAndLbPair(new PublicKey(position.owner)),
   ]);
 
-  const activeId = Number(activeBin?.binId ?? activeBin ?? activeBinId);
+  // Meteora's position endpoint is the canonical source for this wallet's
+  // active bin and price. SDK bin prices can use a different token/decimal
+  // orientation, which made the mobile marker disagree with the range.
+  const activeId = activeBinId;
+  const apiCurrentPrice = Number(position.raw?.poolActivePrice || 0);
   const userPosition = userPositions.find(item => item.publicKey?.toBase58?.() === position.position);
   const userBins = new Map(
     (userPosition?.positionData?.positionBinData || []).map(bin => [bin.binId, bin]),
@@ -66,8 +70,9 @@ export async function getPositionLiquidityProfile(position) {
     activeBinId: activeId,
     minPrice: Number(position.priceRange?.[0] || 0),
     maxPrice: Number(position.priceRange?.[1] || 0),
-    currentPrice: withLiquidity.find(bin => bin.binId === activeId)?.price
-      || Number(position.raw?.poolActivePrice || 0),
+    currentPrice: apiCurrentPrice
+      || withLiquidity.find(bin => bin.binId === activeId)?.price
+      || 0,
     bins: withLiquidity.map(bin => ({
       binId: bin.binId,
       price: bin.price,
