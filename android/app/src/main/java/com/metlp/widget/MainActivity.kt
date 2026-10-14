@@ -28,6 +28,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,7 +58,7 @@ data class SavedWallet(val id: String, val name: String, val address: String, va
 data class LiquidityBin(val binId: Int, val liquidity: Float, val side: String)
 data class TokenAmount(val symbol: String, val amount: Double, val amountSol: Double)
 data class PositionCard(
-    val id: String, val pair: String, val balanceSol: Double, val investedSol: Double, val feesSol: Double,
+    val id: String, val pair: String, val priceUnit: String, val balanceSol: Double, val investedSol: Double, val feesSol: Double,
     val pnlSol: Double, val pnlPercent: Double, val feeTvl24hPercent: Double?, val inRange: Boolean,
     val poolPrice: Double, val minPrice: Double, val maxPrice: Double, val binStep: Int, val poolFeePercent: Double,
     val liquidityTokens: List<TokenAmount>, val feeTokens: List<TokenAmount>, val bins: List<LiquidityBin>, val activeBinId: Int?,
@@ -226,7 +229,7 @@ private fun PositionRow(position: PositionCard) {
             PositionMetric("PNL", "${signedSol(position.pnlSol)}  (${signedPercent(position.pnlPercent)})", if (position.pnlSol >= 0) Positive else Negative)
             PositionMetric("CLAIMABLE FEES", sol(position.feesSol), Color.White)
             PositionMetric("24H FEE / TVL", position.feeTvl24hPercent?.let { percent(it) } ?: "UNAVAILABLE", Color(0xFFF4D8A8))
-            PositionMetric("POOL PRICE", "${price(position.poolPrice)} ${position.pair}", Color(0xFFC9C4D8))
+            PriceMetric("POOL PRICE", position.poolPrice, position.priceUnit)
             Text(if (position.inRange) "IN RANGE" else "OUT OF RANGE", color = if (position.inRange) Cyan else Color(0xFFFFC46B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 13.dp))
             if (expanded) ExpandedPosition(position)
         }
@@ -242,15 +245,26 @@ private fun PositionMetric(label: String, value: String, color: Color) {
 }
 
 @Composable
+private fun PriceMetric(label: String, value: Double, unit: String) {
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = Muted, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CompactPrice(value, color = Color(0xFFC9C4D8), fontSize = 13.sp)
+            Text(" $unit", color = Color(0xFFC9C4D8), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
 private fun ExpandedPosition(position: PositionCard) {
     Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
         HorizontalDivider(color = Color(0xFF3A354A))
         Text("POSITION RANGE", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
         LiquidityChart(position, Modifier.fillMaxWidth().height(128.dp).padding(top = 12.dp))
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            ChartLabel("MIN", price(position.minPrice), Alignment.Start)
-            ChartLabel("POOL PRICE", price(position.poolPrice), Alignment.CenterHorizontally)
-            ChartLabel("MAX", price(position.maxPrice), Alignment.End)
+            ChartLabel("MIN", position.minPrice, Alignment.Start)
+            ChartLabel("POOL PRICE", position.poolPrice, Alignment.CenterHorizontally)
+            ChartLabel("MAX", position.maxPrice, Alignment.End)
         }
         Text("LIQUIDITY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 20.dp, bottom = 7.dp))
         position.liquidityTokens.forEach { TokenLine(it) }
@@ -260,10 +274,10 @@ private fun ExpandedPosition(position: PositionCard) {
 }
 
 @Composable
-private fun ChartLabel(label: String, value: String, alignment: Alignment.Horizontal) {
+private fun ChartLabel(label: String, value: Double, alignment: Alignment.Horizontal) {
     Column(Modifier.width(98.dp), horizontalAlignment = alignment) {
         Text(label, color = Muted, fontSize = 9.sp)
-        Text(value, color = Color(0xFFC9C4D8), fontSize = 11.sp)
+        CompactPrice(value, color = Color(0xFFC9C4D8), fontSize = 11.sp)
     }
 }
 
@@ -336,14 +350,23 @@ private fun fetchWallet(wallet: SavedWallet, limit: Int, success: (WalletPayload
 
 private fun parsePosition(item: JSONObject): PositionCard {
     val liquidity = item.optJSONObject("liquidity"); val bins = liquidity?.optJSONArray("bins")
+    val pair = item.getJSONObject("pair")
+    val base = pair.optString("base")
+    val quote = pair.optString("quote")
+    val isSolBase = base.equals("SOL", ignoreCase = true) && !quote.equals("SOL", ignoreCase = true)
+    fun solPerToken(rawPrice: Double): Double = if (isSolBase && rawPrice > 0.0) 1.0 / rawPrice else rawPrice
+    val rawMinPrice = item.optDouble("minPrice")
+    val rawMaxPrice = item.optDouble("maxPrice")
+    val normalizedMinPrice = solPerToken(rawMinPrice)
+    val normalizedMaxPrice = solPerToken(rawMaxPrice)
     fun tokenList(key: String): List<TokenAmount> {
         val group = item.optJSONObject(key) ?: return emptyList()
         return listOf("token0", "token1").mapNotNull { side -> group.optJSONObject(side)?.let { TokenAmount(it.optString("symbol"), it.optDouble("amount"), it.optDouble("amountSol")) } }
     }
     return PositionCard(
-        id = item.optString("id"), pair = "${item.getJSONObject("pair").optString("base")}/${item.getJSONObject("pair").optString("quote")}",
+        id = item.optString("id"), pair = "$base/$quote", priceUnit = "SOL/${if (isSolBase) quote else base}",
         balanceSol = item.optDouble("totalBalanceSol"), investedSol = item.optDouble("investedSol"), feesSol = item.optDouble("collectibleFeesSol"), pnlSol = item.optDouble("pnlSol"), pnlPercent = item.optDouble("pnlPercent"),
-        feeTvl24hPercent = if (item.isNull("feeTvl24hPercent")) null else item.optDouble("feeTvl24hPercent"), inRange = item.optBoolean("inRange"), poolPrice = item.optDouble("currentPrice"), minPrice = item.optDouble("minPrice"), maxPrice = item.optDouble("maxPrice"), binStep = item.optInt("binStep"), poolFeePercent = item.optDouble("poolFeePercent"),
+        feeTvl24hPercent = if (item.isNull("feeTvl24hPercent")) null else item.optDouble("feeTvl24hPercent"), inRange = item.optBoolean("inRange"), poolPrice = solPerToken(item.optDouble("currentPrice")), minPrice = minOf(normalizedMinPrice, normalizedMaxPrice), maxPrice = maxOf(normalizedMinPrice, normalizedMaxPrice), binStep = item.optInt("binStep"), poolFeePercent = item.optDouble("poolFeePercent"),
         liquidityTokens = tokenList("liquidityTokens"), feeTokens = tokenList("feeTokens"), activeBinId = liquidity?.optInt("activeBinId"),
         bins = List(bins?.length() ?: 0) { index -> bins!!.getJSONObject(index).let { LiquidityBin(it.optInt("binId"), it.optDouble("liquidity").toFloat(), it.optString("side")) } },
     )
@@ -354,7 +377,40 @@ private fun signedSol(value: Double) = String.format(Locale.US, "%+.4f SOL", val
 private fun signedPercent(value: Double) = String.format(Locale.US, "%+.2f%%", value)
 private fun percent(value: Double) = String.format(Locale.US, "%.2f%%", value)
 private fun amount(value: Double) = String.format(Locale.US, "%.4f", value)
-private fun price(value: Double) = if (value >= 0.01) String.format(Locale.US, "%.4f", value) else String.format(Locale.US, "%.6f", value)
+
+private data class CompactPriceParts(val prefix: String, val zeroCount: Int?, val digits: String)
+
+private fun compactPriceParts(value: Double): CompactPriceParts {
+    if (!value.isFinite()) return CompactPriceParts("", null, "-")
+    val sign = if (value < 0) "-" else ""
+    val absolute = kotlin.math.abs(value)
+    if (absolute >= 0.001 || absolute == 0.0) {
+        return CompactPriceParts(sign, null, String.format(Locale.US, "%.4f", absolute))
+    }
+    val decimal = java.math.BigDecimal.valueOf(absolute).stripTrailingZeros().toPlainString()
+    val fraction = decimal.substringAfter('.', "")
+    val zeros = fraction.takeWhile { it == '0' }.length
+    return CompactPriceParts("${sign}0.0", zeros, fraction.drop(zeros).take(4))
+}
+
+@Composable
+private fun CompactPrice(value: Double, color: Color, fontSize: androidx.compose.ui.unit.TextUnit) {
+    val parts = compactPriceParts(value)
+    Text(
+        buildAnnotatedString {
+            append(parts.prefix)
+            parts.zeroCount?.let { count ->
+                pushStyle(SpanStyle(fontSize = fontSize * 0.7f, baselineShift = BaselineShift.Subscript))
+                append(count.toString())
+                pop()
+            }
+            append(parts.digits)
+        },
+        color = color,
+        fontSize = fontSize,
+        fontWeight = FontWeight.SemiBold,
+    )
+}
 
 private object WalletStore {
     private const val PREFS = "metlp_wallets"; private const val KEY = "wallets"
